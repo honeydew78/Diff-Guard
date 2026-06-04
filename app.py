@@ -1,0 +1,194 @@
+import os
+import asyncio
+from fastapi import FastAPI, Request, BackgroundTasks, HTTPException
+from fastapi.responses import JSONResponse
+import httpx
+
+from streaming_client import fetch_repository_archive
+from graph_engine import build_dependency_graph, get_impacted_files
+from parser import extract_functions
+
+app = FastAPI(title="Diff-Guard Risk Engine")
+
+# Fetch token from environment variable
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+
+def get_function_source(code_bytes: bytes, start_line: int, end_line: int) -> bytes:
+    """
+    Extracts the source code lines for a given 1-indexed range.
+    """
+    lines = code_bytes.splitlines()
+    return b"\n".join(lines[start_line - 1 : end_line])
+
+def analyze_diff_and_report(payload: dict):
+    """
+    Background worker that runs the full Diff-Guard pipeline:
+    1. Downloads base & head commit snapshots.
+    2. Builds a codebase dependency graph.
+    3. Resolves modified functions/entities.
+    4. Computes upstream blast radius.
+    5. Formats and dispatches a markdown report to the PR thread.
+    """
+    try:
+        pull_number = payload["pull_request"]["number"]
+        base_sha = payload["pull_request"]["base"]["sha"]
+        head_sha = payload["pull_request"]["head"]["sha"]
+        
+        repo_info = payload["repository"]
+        owner = repo_info["owner"]["login"]
+        repo_name = repo_info["name"]
+        
+        print(f"\n[Diff-Guard] Analyzing PR #{pull_number} ({base_sha} -> {head_sha})")
+        
+        # Step 4 logic: Fetch archive states concurrently
+        base_files = fetch_repository_archive(owner, repo_name, base_sha, GITHUB_TOKEN)
+        head_files = fetch_repository_archive(owner, repo_name, head_sha, GITHUB_TOKEN)
+        
+        # Step 3 logic: Build dependency graph from base state
+        graph = build_dependency_graph(base_files)
+        
+        # Step 2 logic: Compare base and head files to locate structural changes
+        modified_files = []
+        modified_functions_by_file = {}
+        
+        for file_path, base_code in base_files.items():
+            if file_path not in head_files:
+                # File deleted completely
+                modified_files.append(file_path)
+                modified_functions_by_file[file_path] = [("All", "file_deleted")]
+            else:
+                head_code = head_files[file_path]
+                if base_code != head_code:
+                    # Ingest code and extract function boundary definitions
+                    base_funcs = extract_functions(base_code, "python")
+                    head_funcs = extract_functions(head_code, "python")
+                    
+                    changed_funcs = []
+                    
+                    # Check for modified or deleted functions
+                    for f_name, range_b in base_funcs.items():
+                        if f_name not in head_funcs:
+                            changed_funcs.append((f_name, "deleted"))
+                        else:
+                            range_h = head_funcs[f_name]
+                            if get_function_source(base_code, *range_b) != get_function_source(head_code, *range_h):
+                                changed_funcs.append((f_name, "modified"))
+                                
+                    # Check for newly added functions
+                    for f_name in head_funcs:
+                        if f_name not in base_funcs:
+                            changed_funcs.append((f_name, "added"))
+                            
+                    if changed_funcs:
+                        modified_files.append(file_path)
+                        modified_functions_by_file[file_path] = changed_funcs
+                        
+        # Step 3/7 logic: Trace impacted modules upward via DiGraph BFS
+        all_impacted_files = set()
+        impact_paths = {}
+        for m_file in modified_files:
+            impacted = get_impacted_files(graph, m_file)
+            all_impacted_files.update(impacted)
+            impact_paths[m_file] = list(impacted)
+            
+        # Step 8 logic: Format and Dispatch feedback
+        report_md = format_markdown_report(
+            pull_number, modified_files, modified_functions_by_file,
+            all_impacted_files, impact_paths
+        )
+        
+        print("\n--- Generated Architectural Risk Report ---")
+        print(report_md)
+        print("-------------------------------------------\n")
+        
+        if GITHUB_TOKEN:
+            post_comment_to_github(owner, repo_name, pull_number, report_md)
+        else:
+            print("[Diff-Guard] GITHUB_TOKEN not configured. Skipping GitHub comment dispatch.")
+            
+    except Exception as e:
+        print(f"[Diff-Guard] Error during PR analysis: {e}")
+
+def format_markdown_report(
+    pull_number: int,
+    modified_files: list,
+    modified_functions_by_file: dict,
+    all_impacted_files: set,
+    impact_paths: dict
+) -> str:
+    """
+    Constructs a structured GitHub Markdown report with a Risk Score.
+    """
+    # 10 points of risk per impacted downstream file, capped at 100
+    risk_score = min(len(all_impacted_files) * 10, 100)
+    
+    if risk_score >= 50:
+        status = "🔴 HIGH RISK"
+    elif risk_score > 0:
+        status = "🟡 MEDIUM RISK"
+    else:
+        status = "🟢 LOW RISK"
+        
+    md = f"## 🛡️ Diff-Guard Architectural Risk Report\n\n"
+    md += f"**PR:** #{pull_number} | **Status:** {status} | **Risk Score:** {risk_score}/100\n\n"
+    
+    md += "### 🔍 Modified Semantic Entities\n"
+    if not modified_files:
+        md += "_No Python code modifications detected._\n"
+    else:
+        md += "| File | Entity | Change Type |\n"
+        md += "| --- | --- | --- |\n"
+        for m_file in modified_files:
+            for f_name, change_type in modified_functions_by_file.get(m_file, []):
+                md += f"| `{m_file}` | `{f_name}()` | {change_type.upper()} |\n"
+                
+    md += "\n### 🕸️ Architectural Blast Radius\n"
+    if not all_impacted_files:
+        md += "🟢 _No downstream modules are affected by these changes._\n"
+    else:
+        md += f"⚠️ **{len(all_impacted_files)} downstream files** are directly or transitively affected:\n\n"
+        md += "| Modified File | Impacted Downstream Files |\n"
+        md += "| --- | --- |\n"
+        for m_file, impacted in impact_paths.items():
+            if impacted:
+                impacted_str = ", ".join(f"`{f}`" for f in impacted)
+                md += f"| `{m_file}` | {impacted_str} |\n"
+            else:
+                md += f"| `{m_file}` | _None (Terminal module)_ |\n"
+                
+    return md
+
+def post_comment_to_github(owner: str, repo_name: str, pull_number: int, body: str):
+    """
+    Dispatches the generated markdown comment to the GitHub PR thread.
+    """
+    url = f"https://api.github.com/repos/{owner}/{repo_name}/issues/{pull_number}/comments"
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"token {GITHUB_TOKEN}",
+        "User-Agent": "Diff-Guard"
+    }
+    response = httpx.post(url, json={"body": body}, headers=headers)
+    if response.status_code == 201:
+        print("[Diff-Guard] Successfully posted comment back to GitHub PR.")
+    else:
+        print(f"[Diff-Guard] Failed to post comment: {response.status_code} - {response.text}")
+
+@app.post("/webhook")
+async def github_webhook(request: Request, background_tasks: BackgroundTasks):
+    event_type = request.headers.get("X-GitHub-Event")
+    if not event_type:
+        raise HTTPException(status_code=400, detail="Missing X-GitHub-Event header")
+        
+    if event_type != "pull_request":
+        return JSONResponse(status_code=200, content={"status": f"Ignored event: {event_type}"})
+        
+    payload = await request.json()
+    action = payload.get("action")
+    if action not in ("opened", "synchronize", "reopened"):
+        return JSONResponse(status_code=200, content={"status": f"Ignored action: {action}"})
+        
+    # Queue the analysis asynchronously to avoid blocking the webhook response
+    background_tasks.add_task(analyze_diff_and_report, payload)
+    
+    return JSONResponse(status_code=202, content={"status": "Analysis queued"})
