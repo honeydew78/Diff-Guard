@@ -31,9 +31,25 @@ def run_calculation():
 """
 }
 
-def get_function_source(code_bytes: bytes, start_line: int, end_line: int) -> bytes:
-    lines = code_bytes.splitlines()
-    return b"\n".join(lines[start_line - 1 : end_line])
+import difflib
+
+def get_changed_line_numbers(base_code: bytes, head_code: bytes) -> tuple[set[int], set[int]]:
+    base_lines = base_code.decode("utf-8", errors="replace").splitlines()
+    head_lines = head_code.decode("utf-8", errors="replace").splitlines()
+    
+    sm = difflib.SequenceMatcher(None, base_lines, head_lines)
+    base_changed = set()
+    head_changed = set()
+    
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag in ("replace", "delete"):
+            for idx in range(i1, i2):
+                base_changed.add(idx + 1)
+        if tag in ("replace", "insert"):
+            for idx in range(j1, j2):
+                head_changed.add(idx + 1)
+                
+    return base_changed, head_changed
 
 def run_sandbox_integration_test():
     print("Initializing Sandbox Integration Test...\n")
@@ -61,19 +77,25 @@ def run_sandbox_integration_test():
             base_funcs = extract_functions(base_code, "python")
             head_funcs = extract_functions(head_code, "python")
             
+            base_changed, head_changed = get_changed_line_numbers(base_code, head_code)
+            
             changed_funcs = []
             
             # Check for modifications or deletions
-            for f_name, range_b in base_funcs.items():
+            for f_name, (start_b, end_b) in base_funcs.items():
                 if f_name not in head_funcs:
                     changed_funcs.append((f_name, "deleted"))
                 else:
-                    range_h = head_funcs[f_name]
-                    if get_function_source(base_code, *range_b) != get_function_source(head_code, *range_h):
+                    start_h, end_h = head_funcs[f_name]
+                    
+                    b_intersect = any(line in base_changed for line in range(start_b, end_b + 1))
+                    h_intersect = any(line in head_changed for line in range(start_h, end_h + 1))
+                    
+                    if b_intersect or h_intersect:
                         changed_funcs.append((f_name, "modified"))
                         
             # Check for additions
-            for f_name in head_funcs:
+            for f_name, (start_h, end_h) in head_funcs.items():
                 if f_name not in base_funcs:
                     changed_funcs.append((f_name, "added"))
                     

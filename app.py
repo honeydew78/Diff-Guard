@@ -1,5 +1,7 @@
 import os
 import asyncio
+import difflib
+import concurrent.futures
 from fastapi import FastAPI, Request, BackgroundTasks, HTTPException
 from fastapi.responses import JSONResponse
 import httpx
@@ -13,12 +15,27 @@ app = FastAPI(title="Diff-Guard Risk Engine")
 # Fetch token from environment variable
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 
-def get_function_source(code_bytes: bytes, start_line: int, end_line: int) -> bytes:
+def get_changed_line_numbers(base_code: bytes, head_code: bytes) -> tuple[set[int], set[int]]:
     """
-    Extracts the source code lines for a given 1-indexed range.
+    Returns (base_changed_lines, head_changed_lines) as 1-indexed line numbers
+    by computing a diff between the two file contents.
     """
-    lines = code_bytes.splitlines()
-    return b"\n".join(lines[start_line - 1 : end_line])
+    base_lines = base_code.decode("utf-8", errors="replace").splitlines()
+    head_lines = head_code.decode("utf-8", errors="replace").splitlines()
+    
+    sm = difflib.SequenceMatcher(None, base_lines, head_lines)
+    base_changed = set()
+    head_changed = set()
+    
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag in ("replace", "delete"):
+            for idx in range(i1, i2):
+                base_changed.add(idx + 1)
+        if tag in ("replace", "insert"):
+            for idx in range(j1, j2):
+                head_changed.add(idx + 1)
+                
+    return base_changed, head_changed
 
 def analyze_diff_and_report(payload: dict):
     """
@@ -40,9 +57,13 @@ def analyze_diff_and_report(payload: dict):
         
         print(f"\n[Diff-Guard] Analyzing PR #{pull_number} ({base_sha} -> {head_sha})")
         
-        # Step 4 logic: Fetch archive states concurrently
-        base_files = fetch_repository_archive(owner, repo_name, base_sha, GITHUB_TOKEN)
-        head_files = fetch_repository_archive(owner, repo_name, head_sha, GITHUB_TOKEN)
+        # Step 4 logic: Fetch archive states concurrently using ThreadPoolExecutor
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future_base = executor.submit(fetch_repository_archive, owner, repo_name, base_sha, GITHUB_TOKEN)
+            future_head = executor.submit(fetch_repository_archive, owner, repo_name, head_sha, GITHUB_TOKEN)
+            
+            base_files = future_base.result()
+            head_files = future_head.result()
         
         # Step 3 logic: Build dependency graph from base state
         graph = build_dependency_graph(base_files)
@@ -63,19 +84,28 @@ def analyze_diff_and_report(payload: dict):
                     base_funcs = extract_functions(base_code, "python")
                     head_funcs = extract_functions(head_code, "python")
                     
+                    # Calculate exact line changes between base and head
+                    base_changed, head_changed = get_changed_line_numbers(base_code, head_code)
+                    
                     changed_funcs = []
                     
-                    # Check for modified or deleted functions
-                    for f_name, range_b in base_funcs.items():
+                    # Check for modified or deleted functions based on coordinate intersections
+                    for f_name, (start_b, end_b) in base_funcs.items():
                         if f_name not in head_funcs:
                             changed_funcs.append((f_name, "deleted"))
                         else:
-                            range_h = head_funcs[f_name]
-                            if get_function_source(base_code, *range_b) != get_function_source(head_code, *range_h):
+                            # Intersection: Did any of the changed base lines fall within this function?
+                            # We check both base and head coordinates.
+                            start_h, end_h = head_funcs[f_name]
+                            
+                            b_intersect = any(line in base_changed for line in range(start_b, end_b + 1))
+                            h_intersect = any(line in head_changed for line in range(start_h, end_h + 1))
+                            
+                            if b_intersect or h_intersect:
                                 changed_funcs.append((f_name, "modified"))
                                 
                     # Check for newly added functions
-                    for f_name in head_funcs:
+                    for f_name, (start_h, end_h) in head_funcs.items():
                         if f_name not in base_funcs:
                             changed_funcs.append((f_name, "added"))
                             
