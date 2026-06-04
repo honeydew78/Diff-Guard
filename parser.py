@@ -48,3 +48,35 @@ def extract_functions(code_bytes: bytes, language_name: str = "python") -> dict:
                 functions[func_name] = (start_line, end_line)
                 
     return functions
+
+def find_functions_using_symbol(code_bytes: bytes, symbol: str, language_name: str = "python") -> list:
+    """
+    Scans a file's AST for function definitions that contain the specified symbol name
+    inside their body text. Returns a list of function names that are at risk.
+    """
+    parser = get_ast_parser(language_name)
+    root = parse_code(code_bytes, parser)
+    lang = tree_sitter_languages.get_language(language_name)
+    
+    if language_name == "python":
+        query_str = "(function_definition name: (identifier) @func_name)"
+    else:
+        query_str = "(function_definition name: (identifier) @func_name)"
+        
+    query = lang.query(query_str)
+    captures = query.captures(root)
+    at_risk = []
+    
+    for node, capture_name in captures:
+        if capture_name == "func_name":
+            func_name = code_bytes[node.start_byte:node.end_byte].decode("utf-8", errors="ignore")
+            # Get the full text of the function definition
+            func_def_node = node.parent
+            if func_def_node and func_def_node.type == "function_definition":
+                func_text = code_bytes[func_def_node.start_byte:func_def_node.end_byte].decode("utf-8", errors="ignore")
+                # Simple string matching inside the function body
+                if symbol in func_text:
+                    at_risk.append(func_name)
+                    
+    # Maintain insertion order but remove duplicates
+    return list(dict.fromkeys(at_risk))

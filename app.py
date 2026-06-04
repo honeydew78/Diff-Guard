@@ -114,17 +114,50 @@ def analyze_diff_and_report(payload: dict):
                         modified_functions_by_file[file_path] = changed_funcs
                         
         # Step 3/7 logic: Trace impacted modules upward via DiGraph BFS
+        import networkx as nx
+        from parser import find_functions_using_symbol
+        
         all_impacted_files = set()
         impact_paths = {}
+        at_risk_functions = {}
+        
         for m_file in modified_files:
             impacted = get_impacted_files(graph, m_file)
             all_impacted_files.update(impacted)
-            impact_paths[m_file] = list(impacted)
+            
+            paths_dict = {}
+            for imp_file in impacted:
+                try:
+                    path = nx.shortest_path(graph, source=m_file, target=imp_file)
+                    paths_dict[imp_file] = path
+                except nx.NetworkXNoPath:
+                    paths_dict[imp_file] = [m_file, imp_file]
+            impact_paths[m_file] = paths_dict
+            
+        # Identify AT RISK functions in direct consumers
+        for m_file in modified_files:
+            changed_entities = modified_functions_by_file.get(m_file, [])
+            for imp_file, path in impact_paths.get(m_file, {}).items():
+                if len(path) == 2: # Direct consumer
+                    # Scan the consumer for usage of the modified symbols
+                    code_bytes = head_files.get(imp_file)
+                    if code_bytes:
+                        for c_func_name, c_type in changed_entities:
+                            if c_type in ("modified", "deleted"):
+                                found_funcs = find_functions_using_symbol(code_bytes, c_func_name)
+                                if found_funcs:
+                                    if imp_file not in at_risk_functions:
+                                        at_risk_functions[imp_file] = []
+                                    at_risk_functions[imp_file].extend(found_funcs)
+                                    
+        # Dedup at_risk_functions
+        for k in at_risk_functions:
+            at_risk_functions[k] = list(dict.fromkeys(at_risk_functions[k]))
             
         # Step 8 logic: Format and Dispatch feedback
         report_md = format_markdown_report(
             pull_number, modified_files, modified_functions_by_file,
-            all_impacted_files, impact_paths
+            all_impacted_files, impact_paths, at_risk_functions
         )
         
         print("\n--- Generated Architectural Risk Report ---")
@@ -144,7 +177,8 @@ def format_markdown_report(
     modified_files: list,
     modified_functions_by_file: dict,
     all_impacted_files: set,
-    impact_paths: dict
+    impact_paths: dict,
+    at_risk_functions: dict
 ) -> str:
     """
     Constructs a structured GitHub Markdown report with a Risk Score.
@@ -177,15 +211,25 @@ def format_markdown_report(
         md += "🟢 _No downstream modules are affected by these changes._\n"
     else:
         md += f"⚠️ **{len(all_impacted_files)} downstream files** are directly or transitively affected:\n\n"
-        md += "| Modified File | Impacted Downstream Files |\n"
+        md += "| Modified File | Impacted Downstream Files (Dependency Path) |\n"
         md += "| --- | --- |\n"
-        for m_file, impacted in impact_paths.items():
-            if impacted:
-                impacted_str = ", ".join(f"`{f}`" for f in impacted)
-                md += f"| `{m_file}` | {impacted_str} |\n"
+        for m_file, paths_dict in impact_paths.items():
+            if paths_dict:
+                for imp_file, path in paths_dict.items():
+                    path_str = " ➔ ".join(f"`{f}`" for f in path)
+                    md += f"| `{m_file}` | {path_str} |\n"
             else:
                 md += f"| `{m_file}` | _None (Terminal module)_ |\n"
                 
+    if at_risk_functions:
+        md += "\n### 🔍 Downstream Functions at Risk\n"
+        md += "The following specific functions in direct consumer files rely on the modified symbols and may be at risk:\n\n"
+        md += "| Consumer File | At-Risk Functions |\n"
+        md += "| --- | --- |\n"
+        for imp_file, funcs in at_risk_functions.items():
+            funcs_str = ", ".join(f"`{f}()`" for f in funcs)
+            md += f"| `{imp_file}` | {funcs_str} |\n"
+            
     return md
 
 def post_comment_to_github(owner: str, repo_name: str, pull_number: int, body: str):

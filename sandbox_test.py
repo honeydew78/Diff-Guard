@@ -106,11 +106,39 @@ def run_sandbox_integration_test():
 
     # 3. Resolve architectural blast radius via Graph solver
     print("\n[3/4] Tracing architectural blast radius...")
+    import networkx as nx
+    from parser import find_functions_using_symbol
+    
     all_impacted_files = set()
+    impact_paths = {}
+    at_risk_functions = {}
+    
     for m_file in modified_files:
         impacted = get_impacted_files(graph, m_file)
         all_impacted_files.update(impacted)
-        print(f"  - Changes in '{m_file}' impact upstream: {impacted}")
+        
+        paths_dict = {}
+        for imp_file in impacted:
+            paths_dict[imp_file] = nx.shortest_path(graph, m_file, imp_file)
+        impact_paths[m_file] = paths_dict
+        
+        print(f"  - Changes in '{m_file}' impact upstream: {paths_dict}")
+        
+    for m_file in modified_files:
+        changed_entities = modified_functions[m_file]
+        for imp_file, path in impact_paths.get(m_file, {}).items():
+            if len(path) == 2: # Direct consumer
+                code_bytes = head_repo.get(imp_file)
+                if code_bytes:
+                    for c_func_name, c_type in changed_entities:
+                        if c_type in ("modified", "deleted"):
+                            found_funcs = find_functions_using_symbol(code_bytes, c_func_name)
+                            if found_funcs:
+                                if imp_file not in at_risk_functions:
+                                    at_risk_functions[imp_file] = []
+                                at_risk_functions[imp_file].extend(found_funcs)
+                                
+    print(f"\n  - At-Risk Functions in consumers: {at_risk_functions}")
         
     # 4. Assertions and verification
     print("\n[4/4] Running assertions verification...")
@@ -123,6 +151,12 @@ def run_sandbox_integration_test():
     
     # Assert that file_a.py is impacted by changes in file_b.py
     assert "file_a.py" in all_impacted_files, "file_a.py should be in the blast radius of file_b.py"
+    
+    # Assert the correct path is detected
+    assert impact_paths["file_b.py"]["file_a.py"] == ["file_b.py", "file_a.py"]
+    
+    # Assert that run_calculation is identified as an at-risk function inside file_a.py!
+    assert "run_calculation" in at_risk_functions["file_a.py"], "run_calculation should be marked at risk"
     
     print("\n✓ Sandbox Integration Test passed successfully!")
 
