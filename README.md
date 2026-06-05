@@ -19,13 +19,11 @@ Diff-Guard is a stateless, high-performance static analyzer and developer tool d
 The Diff-Guard dashboard provides an interactive network graph of your codebase. It highlights modified files (orange) and impacted downstream consumers (purple) so you can instantly see the architectural impact of a change.
 
 ![Diff-Guard Dashboard](dashboard.png)
-*(Note: Save your dashboard screenshot as `dashboard.png` in the repository root to render it here)*
+<img width="2940" height="1594" alt="image" src="https://github.com/user-attachments/assets/f06a03e5-5815-4a82-ba46-66286007763a" />
+
 
 ### Automated PR Comments
 When integrated via GitHub webhooks, Diff-Guard automatically posts a detailed markdown report directly on your Pull Requests, listing the affected downstream modules and functions at risk.
-
-![GitHub Action Report](github_action.png)
-*(Note: Save your GitHub Action/PR comment screenshot as `github_action.png` in the repository root to render it here)*
 
 ---
 
