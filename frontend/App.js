@@ -274,7 +274,7 @@ export default function App() {
                     }
                 },
                 {
-                    selector: 'node[isModified]',
+                    selector: 'node[?isModified]',
                     style: {
                         'background-color': '#f59e0b',
                         'width': '22px',
@@ -287,7 +287,7 @@ export default function App() {
                     }
                 },
                 {
-                    selector: 'node[isImpacted]',
+                    selector: 'node[?isImpacted]',
                     style: {
                         'background-color': '#818cf8',
                         'width': '18px',
