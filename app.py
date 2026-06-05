@@ -4,6 +4,8 @@ import difflib
 import concurrent.futures
 from fastapi import FastAPI, Request, BackgroundTasks, HTTPException
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 import httpx
 
 from streaming_client import fetch_repository_archive
@@ -266,3 +268,154 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks):
     background_tasks.add_task(analyze_diff_and_report, payload)
     
     return JSONResponse(status_code=202, content={"status": "Analysis queued"})
+
+def parse_github_url(url: str) -> tuple[str, str]:
+    url = url.strip()
+    if url.endswith(".git"):
+        url = url[:-4]
+    if "github.com/" in url:
+        parts = url.split("github.com/")[-1].split("/")
+        if len(parts) >= 2:
+            return parts[0], parts[1]
+    parts = url.split("/")
+    if len(parts) == 2:
+        return parts[0], parts[1]
+    raise ValueError("Invalid GitHub URL. Must be like 'https://github.com/owner/repo' or 'owner/repo'")
+
+class AnalyzeRequest(BaseModel):
+    repo_url: str
+    base: str
+    head: str
+
+@app.post("/api/analyze")
+async def api_analyze(req: AnalyzeRequest):
+    try:
+        owner, repo_name = parse_github_url(req.repo_url)
+        loop = asyncio.get_event_loop()
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future_base = loop.run_in_executor(executor, fetch_repository_archive, owner, repo_name, req.base, GITHUB_TOKEN)
+            future_head = loop.run_in_executor(executor, fetch_repository_archive, owner, repo_name, req.head, GITHUB_TOKEN)
+            base_files = await future_base
+            head_files = await future_head
+            
+        graph = build_dependency_graph(base_files)
+        modified_files = []
+        modified_functions_by_file = {}
+        
+        for file_path, base_code in base_files.items():
+            if file_path not in head_files:
+                modified_files.append(file_path)
+                modified_functions_by_file[file_path] = [("All", "file_deleted")]
+            else:
+                head_code = head_files[file_path]
+                if base_code != head_code:
+                    base_funcs = extract_functions(base_code, "python")
+                    head_funcs = extract_functions(head_code, "python")
+                    base_changed, head_changed = get_changed_line_numbers(base_code, head_code)
+                    changed_funcs = []
+                    
+                    for f_name, (start_b, end_b) in base_funcs.items():
+                        if f_name not in head_funcs:
+                            changed_funcs.append((f_name, "deleted"))
+                        else:
+                            start_h, end_h = head_funcs[f_name]
+                            b_intersect = any(line in base_changed for line in range(start_b, end_b + 1))
+                            h_intersect = any(line in head_changed for line in range(start_h, end_h + 1))
+                            if b_intersect or h_intersect:
+                                changed_funcs.append((f_name, "modified"))
+                                
+                    for f_name, (start_h, end_h) in head_funcs.items():
+                        if f_name not in base_funcs:
+                            changed_funcs.append((f_name, "added"))
+                            
+                    if changed_funcs:
+                        modified_files.append(file_path)
+                        modified_functions_by_file[file_path] = changed_funcs
+                        
+        import networkx as nx
+        from parser import find_functions_using_symbol
+        all_impacted_files = set()
+        impact_paths = {}
+        at_risk_functions = {}
+        
+        for m_file in modified_files:
+            impacted = get_impacted_files(graph, m_file)
+            all_impacted_files.update(impacted)
+            paths_dict = {}
+            for imp_file in impacted:
+                try:
+                    path = nx.shortest_path(graph, source=m_file, target=imp_file)
+                    paths_dict[imp_file] = path
+                except nx.NetworkXNoPath:
+                    paths_dict[imp_file] = [m_file, imp_file]
+            impact_paths[m_file] = paths_dict
+            
+        for m_file in modified_files:
+            changed_entities = modified_functions_by_file.get(m_file, [])
+            for imp_file, path in impact_paths.get(m_file, {}).items():
+                if len(path) == 2:
+                    code_bytes = head_files.get(imp_file)
+                    if code_bytes:
+                        for c_func_name, c_type in changed_entities:
+                            if c_type in ("modified", "deleted"):
+                                found_funcs = find_functions_using_symbol(code_bytes, c_func_name)
+                                if found_funcs:
+                                    if imp_file not in at_risk_functions:
+                                        at_risk_functions[imp_file] = []
+                                    at_risk_functions[imp_file].extend(found_funcs)
+                                    
+        for k in at_risk_functions:
+            at_risk_functions[k] = list(dict.fromkeys(at_risk_functions[k]))
+            
+        risk_score = min(len(all_impacted_files) * 10, 100)
+        status = "LOW RISK"
+        if risk_score >= 50:
+            status = "HIGH RISK"
+        elif risk_score > 0:
+            status = "MEDIUM RISK"
+            
+        nodes = []
+        for n in graph.nodes():
+            nodes.append({
+                "id": n,
+                "label": os.path.basename(n),
+                "is_modified": n in modified_files,
+                "is_impacted": n in all_impacted_files
+            })
+            
+        edges = []
+        for u, v in graph.edges():
+            edges.append({
+                "source": u,
+                "target": v
+            })
+            
+        formatted_mod_files = []
+        for m_file in modified_files:
+            changed_entities = []
+            for f_name, change_type in modified_functions_by_file.get(m_file, []):
+                changed_entities.append({
+                    "entity": f_name,
+                    "change_type": change_type
+                })
+            formatted_mod_files.append({
+                "file": m_file,
+                "changed_entities": changed_entities
+            })
+            
+        return {
+            "status": status,
+            "risk_score": risk_score,
+            "modified_files": formatted_mod_files,
+            "all_impacted_files": list(all_impacted_files),
+            "at_risk_functions": at_risk_functions,
+            "graph_data": {
+                "nodes": nodes,
+                "edges": edges
+            }
+        }
+    except Exception as e:
+        print(f"[Diff-Guard API Error] {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+app.mount("/dashboard", StaticFiles(directory="frontend", html=True), name="frontend")
