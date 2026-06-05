@@ -18,7 +18,7 @@ const Icons = {
         </svg>
     `,
     BarChart: () => html`
-        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <line x1="18" y1="20" x2="18" y2="10"/>
             <line x1="12" y1="20" x2="12" y2="4"/>
             <line x1="6" y1="20" x2="6" y2="14"/>
@@ -82,6 +82,20 @@ const Icons = {
             <line x1="15" y1="9" x2="9" y2="15"/>
             <line x1="9" y1="9" x2="15" y2="15"/>
         </svg>
+    `,
+    Clock: () => html`
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/>
+            <polyline points="12 6 12 12 16 14"/>
+        </svg>
+    `,
+    Trash: () => html`
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="3 6 5 6 21 6"/>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+            <line x1="10" y1="11" x2="10" y2="17"/>
+            <line x1="14" y1="11" x2="14" y2="17"/>
+        </svg>
     `
 };
 
@@ -93,9 +107,83 @@ export default function App() {
     const [error, setError] = useState(null);
     const [data, setData] = useState(null);
     const [selectedNode, setSelectedNode] = useState(null);
+    const [activeTab, setActiveTab] = useState('summary'); // 'summary' or 'history'
+    const [history, setHistory] = useState([]);
 
     const containerRef = useRef(null);
     const cyRef = useRef(null);
+
+    // Load history from localStorage on mount
+    useEffect(() => {
+        const storedHistory = localStorage.getItem('diff_guard_history');
+        if (storedHistory) {
+            try {
+                setHistory(JSON.parse(storedHistory));
+            } catch (e) {
+                console.error("Error parsing history from localStorage", e);
+            }
+        }
+    }, []);
+
+    const saveToHistory = (url, b, h, result) => {
+        let repoName = url;
+        try {
+            const cleanUrl = url.trim().replace(/\.git$/, '');
+            if (cleanUrl.includes('github.com/')) {
+                const parts = cleanUrl.split('github.com/');
+                if (parts.length > 1) repoName = parts[1];
+            } else if (cleanUrl.includes('github.com:')) {
+                const parts = cleanUrl.split('github.com:');
+                if (parts.length > 1) repoName = parts[1];
+            }
+        } catch (e) {}
+
+        const newItem = {
+            id: Date.now().toString(),
+            repoUrl: url,
+            repoName: repoName,
+            base: b,
+            head: h,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            score: result.risk_score,
+            status: result.status,
+            result: result
+        };
+
+        // Prepend and dedup checks on the exact same repo/base/head coordinates
+        const filtered = history.filter(item => !(item.repoUrl === url && item.base === b && item.head === h));
+        const updatedHistory = [newItem, ...filtered].slice(0, 50); // limit to last 50 items
+        setHistory(updatedHistory);
+        localStorage.setItem('diff_guard_history', JSON.stringify(updatedHistory));
+    };
+
+    const deleteHistoryItem = (id, e) => {
+        if (e) e.stopPropagation();
+        const updated = history.filter(item => item.id !== id);
+        setHistory(updated);
+        localStorage.setItem('diff_guard_history', JSON.stringify(updated));
+    };
+
+    const clearAllHistory = () => {
+        setHistory([]);
+        localStorage.removeItem('diff_guard_history');
+    };
+
+    const loadHistoryItem = (item) => {
+        setRepoUrl(item.repoUrl);
+        setBase(item.base);
+        setHead(item.head);
+        setData(item.result);
+        setSelectedNode(null);
+        setActiveTab('summary'); // Switch view to display results
+    };
+
+    // Run Lucide icons renderer when DOM updates
+    useEffect(() => {
+        if (window.lucide) {
+            window.lucide.createIcons();
+        }
+    });
 
     const handleAnalyze = async (e) => {
         if (e) e.preventDefault();
@@ -123,6 +211,7 @@ export default function App() {
             
             const result = await response.json();
             setData(result);
+            saveToHistory(repoUrl, base, head, result);
         } catch (err) {
             console.error(err);
             setError(err.message);
@@ -399,67 +488,124 @@ export default function App() {
             <main className="main-workspace">
                 <!-- Left Sidebar: Score + Modified Semantic Entities -->
                 <aside className="sidebar glass-panel">
-                    <div className="panel-header">
-                        <span>Risk Analysis Summary</span>
-                        <${Icons.BarChart} />
+                    <div className="sidebar-tabs">
+                        <button 
+                            className="sidebar-tab ${activeTab === 'summary' ? 'active' : ''}" 
+                            onClick=${() => setActiveTab('summary')}
+                        >
+                            <${Icons.BarChart} />
+                            <span>Summary</span>
+                        </button>
+                        <button 
+                            className="sidebar-tab ${activeTab === 'history' ? 'active' : ''}" 
+                            onClick=${() => setActiveTab('history')}
+                        >
+                            <${Icons.Clock} />
+                            <span>History</span>
+                        </button>
                     </div>
                     
                     <div className="panel-body" style=${{display: 'flex', flexDirection: 'column', gap: '20px'}}>
-                        ${!data ? html`
-                            <div className="empty-state">
-                                <${Icons.Terminal} />
-                                <span>Submit repo coordinates to load risk summary.</span>
-                            </div>
-                        ` : html`
-                            <div className="risk-meter-container">
-                                <div className="risk-circle">
-                                    <svg className="risk-circle-svg" width="130" height="130">
-                                        <circle className="risk-circle-bg" cx="65" cy="65" r="60"/>
-                                        <circle 
-                                            className="risk-circle-fill" 
-                                            cx="65" 
-                                            cy="65" 
-                                            r="60"
-                                            strokeDasharray="377"
-                                            strokeDashoffset=${strokeDashoffset}
-                                            style=${{
-                                                stroke: riskStatus === 'low' ? 'var(--color-success)' : (riskStatus === 'medium' ? 'var(--color-warning)' : 'var(--color-danger)')
-                                            }}
-                                        />
-                                    </svg>
-                                    <div className="risk-circle-text">
-                                        <span className="risk-score-value">${score}</span>
-                                        <span className="risk-score-label">Score</span>
+                        ${activeTab === 'summary' ? (
+                            !data ? html`
+                                <div className="empty-state">
+                                    <${Icons.Terminal} />
+                                    <span>Submit repo coordinates to load risk summary.</span>
+                                </div>
+                            ` : html`
+                                <div className="risk-meter-container">
+                                    <div className="risk-circle">
+                                        <svg className="risk-circle-svg" width="130" height="130">
+                                            <circle className="risk-circle-bg" cx="65" cy="65" r="60"/>
+                                            <circle 
+                                                className="risk-circle-fill" 
+                                                cx="65" 
+                                                cy="65" 
+                                                r="60"
+                                                strokeDasharray="377"
+                                                strokeDashoffset=${strokeDashoffset}
+                                                style=${{
+                                                    stroke: riskStatus === 'low' ? 'var(--color-success)' : (riskStatus === 'medium' ? 'var(--color-warning)' : 'var(--color-danger)')
+                                                }}
+                                            />
+                                        </svg>
+                                        <div className="risk-circle-text">
+                                            <span className="risk-score-value">${score}</span>
+                                            <span className="risk-score-label">Score</span>
+                                        </div>
+                                    </div>
+                                    <div className="risk-status-badge ${riskStatus}">
+                                        ${data.status}
                                     </div>
                                 </div>
-                                <div className="risk-status-badge ${riskStatus}">
-                                    ${data.status}
+                                
+                                <!-- Changed Entities List -->
+                                <div style=${{flexGrow: 1, minHeight: '0', display: 'flex', flexDirection: 'column'}}>
+                                    <h3 style=${{fontSize: '0.8rem', color: 'var(--text-secondary)', textTransform: 'uppercase', marginBottom: '10px'}}>Modified Semantic Files</h3>
+                                    <div className="file-list" style=${{overflowY: 'auto', maxHeight: '250px'}}>
+                                        ${data.modified_files.length === 0 ? html`
+                                            <div className="empty-state" style=${{padding: '10px'}}>No Python modifications.</div>
+                                        ` : data.modified_files.map(item => html`
+                                            <div 
+                                                key=${item.file} 
+                                                className="file-item ${selectedNode?.id === item.file ? 'selected' : ''}"
+                                                onClick=${() => setSelectedNode({ id: item.file, isModified: true, isImpacted: false })}
+                                            >
+                                                <div className="file-item-header">
+                                                    <span className="file-name" title=${item.file}>${item.file}</span>
+                                                    <span className="file-badge modified">Modified</span>
+                                                </div>
+                                                <div className="entity-tags">
+                                                    ${item.changed_entities.map(e => html`
+                                                        <span key=${e.entity} className="entity-tag">${e.entity}</span>
+                                                    `)}
+                                                </div>
+                                            </div>
+                                        `)}
+                                    </div>
                                 </div>
-                            </div>
-                            
-                            <!-- Changed Entities List -->
-                            <div style=${{flexGrow: 1, minHeight: '0', display: 'flex', flexDirection: 'column'}}>
-                                <h3 style=${{fontSize: '0.8rem', color: 'var(--text-secondary)', textTransform: 'uppercase', marginBottom: '10px'}}>Modified Semantic Files</h3>
-                                <div className="file-list" style=${{overflowY: 'auto', maxHeight: '250px'}}>
-                                    ${data.modified_files.length === 0 ? html`
-                                        <div className="empty-state" style=${{padding: '10px'}}>No Python modifications.</div>
-                                    ` : data.modified_files.map(item => html`
-                                        <div 
-                                            key=${item.file} 
-                                            className="file-item ${selectedNode?.id === item.file ? 'selected' : ''}"
-                                            onClick=${() => setSelectedNode({ id: item.file, isModified: true, isImpacted: false })}
-                                        >
-                                            <div className="file-item-header">
-                                                <span className="file-name" title=${item.file}>${item.file}</span>
-                                                <span className="file-badge modified">Modified</span>
-                                            </div>
-                                            <div className="entity-tags">
-                                                ${item.changed_entities.map(e => html`
-                                                    <span key=${e.entity} className="entity-tag">${e.entity}</span>
-                                                `)}
-                                            </div>
+                            `
+                        ) : html`
+                            <!-- History Tab View -->
+                            <div style=${{display: 'flex', flexDirection: 'column', height: '100%'}}>
+                                <div className="history-header">
+                                    <h3 style=${{fontSize: '0.8rem', color: 'var(--text-secondary)', textTransform: 'uppercase'}}>Recent Checks</h3>
+                                    ${history.length > 0 && html`
+                                        <button className="btn-delete-all" onClick=${clearAllHistory}>
+                                            <${Icons.Trash} />
+                                            <span>Clear All</span>
+                                        </button>
+                                    `}
+                                </div>
+                                
+                                <div className="history-list" style=${{overflowY: 'auto', flexGrow: 1}}>
+                                    ${history.length === 0 ? html`
+                                        <div className="empty-state">
+                                            <${Icons.Clock} />
+                                            <span style=${{marginTop: '8px'}}>No history yet. Run an analysis!</span>
                                         </div>
-                                    `)}
+                                    ` : history.map(item => {
+                                        const itemStatusClass = item.status.toLowerCase();
+                                        return html`
+                                            <div 
+                                                key=${item.id} 
+                                                className="history-item ${repoUrl === item.repoUrl && base === item.base && head === item.head ? 'active' : ''}"
+                                                onClick=${() => loadHistoryItem(item)}
+                                            >
+                                                <div className="history-item-header">
+                                                    <span className="history-repo" title=${item.repoName}>${item.repoName}</span>
+                                                    <span className="history-score-badge ${itemStatusClass}">${item.score}%</span>
+                                                </div>
+                                                <div className="history-item-details">
+                                                    <span className="history-refs" title="${item.base} ➔ ${item.head}">${item.base} ➔ ${item.head}</span>
+                                                    <span className="history-time">${item.timestamp}</span>
+                                                </div>
+                                                <button className="btn-delete-item" onClick=${(e) => deleteHistoryItem(item.id, e)} title="Delete entry">
+                                                    <${Icons.Trash} />
+                                                </button>
+                                            </div>
+                                        `;
+                                    })}
                                 </div>
                             </div>
                         `}
