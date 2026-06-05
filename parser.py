@@ -80,3 +80,51 @@ def find_functions_using_symbol(code_bytes: bytes, symbol: str, language_name: s
                     
     # Maintain insertion order but remove duplicates
     return list(dict.fromkeys(at_risk))
+
+def extract_api_routes(code_bytes: bytes, language_name: str = "python") -> dict:
+    """
+    Parses code to find functions decorated with HTTP route decorators.
+    Returns a dict mapping function name to {"method": "HTTP_METHOD", "path": "/url/path"}.
+    """
+    routes = {}
+    if language_name != "python":
+        return routes
+        
+    parser = get_ast_parser(language_name)
+    root = parse_code(code_bytes, parser)
+    lang = tree_sitter_languages.get_language(language_name)
+    
+    query_str = """
+    (decorated_definition
+      (decorator
+        (call
+          function: (attribute
+            attribute: (identifier) @method)
+          arguments: (argument_list
+            (string) @path)))
+      (function_definition
+        name: (identifier) @func_name))
+    """
+    
+    query = lang.query(query_str)
+    captures = query.captures(root)
+    
+    # Process captures which are returned sequentially
+    # We expect sets of [method, path, func_name] per decorated function
+    current_method = None
+    current_path = None
+    
+    for node, capture_name in captures:
+        text = code_bytes[node.start_byte:node.end_byte].decode("utf-8", errors="ignore")
+        if capture_name == "method":
+            current_method = text.upper()
+        elif capture_name == "path":
+            # Remove quotes from string literal
+            current_path = text.strip("\"'")
+        elif capture_name == "func_name":
+            if current_method and current_path:
+                routes[text] = {"method": current_method, "path": current_path}
+            current_method = None
+            current_path = None
+            
+    return routes

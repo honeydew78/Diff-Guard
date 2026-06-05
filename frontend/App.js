@@ -748,6 +748,38 @@ export default function App() {
                                         })}
                                     </div>
                                 </div>
+                                
+                                ${data.impacted_apis && data.impacted_apis.length > 0 && html`
+                                    <div style=${{marginTop: '4px'}}>
+                                        <h3 style=${{fontSize: '0.8rem', color: '#f87171', textTransform: 'uppercase', marginBottom: '4px'}}>
+                                            🚨 Impacted Public Entrypoints
+                                        </h3>
+                                        <p style=${{fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '10px'}}>These Web APIs and CLI commands are in the blast radius.</p>
+                                        
+                                        <div className="file-list" style=${{overflowY: 'auto', maxHeight: '180px'}}>
+                                            ${data.impacted_apis.map((api, idx) => {
+                                                let badgeStyle = { marginRight: '6px', fontWeight: 700, padding: '2px 6px', borderRadius: '4px', fontSize: '0.65rem' };
+                                                if (api.method === 'GET') { badgeStyle = {...badgeStyle, background: 'rgba(16, 185, 129, 0.15)', color: '#34d399', border: '1px solid rgba(16, 185, 129, 0.3)'}; }
+                                                else if (api.method === 'POST') { badgeStyle = {...badgeStyle, background: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa', border: '1px solid rgba(59, 130, 246, 0.3)'}; }
+                                                else if (api.method === 'DELETE') { badgeStyle = {...badgeStyle, background: 'rgba(239, 68, 68, 0.15)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.3)'}; }
+                                                else { badgeStyle = {...badgeStyle, background: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24', border: '1px solid rgba(245, 158, 11, 0.3)'}; }
+                                                
+                                                return html`
+                                                    <div key=${idx} className="file-item" onClick=${() => setSelectedNode({ id: api.file, isModified: false, isImpacted: true })}>
+                                                        <div className="file-item-header" style=${{marginBottom: '6px'}}>
+                                                            <span style=${badgeStyle}>${api.method}</span>
+                                                            <span className="file-name" style=${{color: '#f3f4f6', fontFamily: 'monospace', fontSize: '0.75rem'}} title=${api.path}>${api.path}</span>
+                                                        </div>
+                                                        <div style=${{fontSize: '0.7rem', color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between'}}>
+                                                            <span>via <code>${api.function}()</code></span>
+                                                            <span title=${api.file}>...${api.file.split('/').pop()}</span>
+                                                        </div>
+                                                    </div>
+                                                `;
+                                            })}
+                                        </div>
+                                    </div>
+                                `}
                             </div>
                         `}
                     </div>

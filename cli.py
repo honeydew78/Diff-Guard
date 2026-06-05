@@ -166,11 +166,27 @@ def run_analysis(repo_path: str, base: str, head: str) -> str:
     for k in at_risk_functions:
         at_risk_functions[k] = list(dict.fromkeys(at_risk_functions[k]))
         
+    # Extract API Routes for impacted files
+    from parser import extract_api_routes
+    impacted_apis = []
+    for imp_file, funcs in at_risk_functions.items():
+        code_bytes = git_show(repo_path, head, imp_file)
+        if code_bytes:
+            routes = extract_api_routes(code_bytes)
+            for f in funcs:
+                if f in routes:
+                    impacted_apis.append({
+                        "file": imp_file,
+                        "function": f,
+                        "method": routes[f]["method"],
+                        "path": routes[f]["path"]
+                    })
+        
     # 6. Format markdown report
     # We pass 0 as dummy PR number for CLI display, or we will override it in main()
     return format_markdown_report(
         0, modified_files, modified_functions_by_file,
-        all_impacted_files, impact_paths, at_risk_functions
+        all_impacted_files, impact_paths, at_risk_functions, impacted_apis
     )
 
 def main():

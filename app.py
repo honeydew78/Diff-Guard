@@ -10,7 +10,7 @@ import httpx
 
 from streaming_client import fetch_repository_archive
 from graph_engine import build_dependency_graph, get_impacted_files
-from parser import extract_functions
+from parser import extract_functions, find_functions_using_symbol, extract_api_routes
 
 app = FastAPI(title="Diff-Guard Risk Engine")
 
@@ -156,10 +156,28 @@ def analyze_diff_and_report(payload: dict):
         for k in at_risk_functions:
             at_risk_functions[k] = list(dict.fromkeys(at_risk_functions[k]))
             
+        all_api_routes = {}
+        for f_path, h_code in head_files.items():
+            routes = extract_api_routes(h_code)
+            for f_name, r_info in routes.items():
+                all_api_routes[(f_path, f_name)] = r_info
+                
+        impacted_apis = []
+        for imp_file, funcs in at_risk_functions.items():
+            for f in funcs:
+                if (imp_file, f) in all_api_routes:
+                    route_info = all_api_routes[(imp_file, f)]
+                    impacted_apis.append({
+                        "file": imp_file,
+                        "function": f,
+                        "method": route_info["method"],
+                        "path": route_info["path"]
+                    })
+            
         # Step 8 logic: Format and Dispatch feedback
         report_md = format_markdown_report(
             pull_number, modified_files, modified_functions_by_file,
-            all_impacted_files, impact_paths, at_risk_functions
+            all_impacted_files, impact_paths, at_risk_functions, impacted_apis
         )
         
         print("\n--- Generated Architectural Risk Report ---")
@@ -180,7 +198,8 @@ def format_markdown_report(
     modified_functions_by_file: dict,
     all_impacted_files: set,
     impact_paths: dict,
-    at_risk_functions: dict
+    at_risk_functions: dict,
+    impacted_apis: list
 ) -> str:
     """
     Constructs a structured GitHub Markdown report with a Risk Score.
@@ -231,6 +250,15 @@ def format_markdown_report(
         for imp_file, funcs in at_risk_functions.items():
             funcs_str = ", ".join(f"`{f}()`" for f in funcs)
             md += f"| `{imp_file}` | {funcs_str} |\n"
+            
+    if impacted_apis:
+        md += "\n### 🚨 Impacted Public Entrypoints (QA Action Required)\n"
+        md += "The following HTTP APIs and CLI commands are in the blast radius of this change:\n\n"
+        md += "| Consumer File | Entrypoint |\n"
+        md += "| --- | --- |\n"
+        for api in impacted_apis:
+            method_badge = f"**[{api['method']}]**"
+            md += f"| `{api['file']}` | {method_badge} `{api['path']}` (via `{api['function']}`)| \n"
             
     return md
 
@@ -367,6 +395,24 @@ async def api_analyze(req: AnalyzeRequest):
         for k in at_risk_functions:
             at_risk_functions[k] = list(dict.fromkeys(at_risk_functions[k]))
             
+        all_api_routes = {}
+        for f_path, h_code in head_files.items():
+            routes = extract_api_routes(h_code)
+            for f_name, r_info in routes.items():
+                all_api_routes[(f_path, f_name)] = r_info
+                
+        impacted_apis = []
+        for imp_file, funcs in at_risk_functions.items():
+            for f in funcs:
+                if (imp_file, f) in all_api_routes:
+                    route_info = all_api_routes[(imp_file, f)]
+                    impacted_apis.append({
+                        "file": imp_file,
+                        "function": f,
+                        "method": route_info["method"],
+                        "path": route_info["path"]
+                    })
+            
         risk_score = min(len(all_impacted_files) * 10, 100)
         status = "LOW RISK"
         if risk_score >= 50:
@@ -409,6 +455,7 @@ async def api_analyze(req: AnalyzeRequest):
             "modified_files": formatted_mod_files,
             "all_impacted_files": list(all_impacted_files),
             "at_risk_functions": at_risk_functions,
+            "impacted_apis": impacted_apis,
             "graph_data": {
                 "nodes": nodes,
                 "edges": edges
