@@ -1,6 +1,6 @@
 # 🛡️ Diff-Guard: Stateless AST-Based Architectural Risk Engine
 
-Diff-Guard is a stateless, high-performance static analyzer and developer tool designed to run in continuous integration (CI) environments or webhook containers. By translating source code into Abstract Syntax Trees (ASTs) rather than parsing raw text differences, Diff-Guard resolves modified semantic entities (like functions) and calculates their exact architectural "blast radius" upward through your codebase using a directed dependency call graph.
+Diff-Guard is a stateless, high-performance static analyzer and developer tool designed to run in continuous integration (CI) environments, webhook containers, or as a local dashboard. By translating source code into Abstract Syntax Trees (ASTs) rather than parsing raw text differences, Diff-Guard resolves modified semantic entities (like functions) and calculates their exact architectural "blast radius" upward through your codebase using a directed dependency call graph.
 
 ---
 
@@ -9,13 +9,48 @@ Diff-Guard is a stateless, high-performance static analyzer and developer tool d
 - **AST Change Intersection:** Maps changed code coordinates directly to tree-sitter AST nodes to find altered semantic functions.
 - **Transitive Impact Graph:** Reconstructs your repository's dependency graph in-memory using `networkx` to run upstream BFS queries.
 - **Automated PR Reviewer:** Posts clear, structured feedback reports containing a calculated risk score directly to the developer's GitHub Pull Request.
+- **Interactive React Dashboard:** A visually stunning, glassmorphic UI built with React and Cytoscape.js. It allows developers to visualize the blast radius of any two commits and keeps a history of past analyses using local storage.
+
+---
+
+## 📸 Dashboard & Reports
+
+### Interactive Dependency Graph
+The Diff-Guard dashboard provides an interactive network graph of your codebase. It highlights modified files (orange) and impacted downstream consumers (purple) so you can instantly see the architectural impact of a change.
+
+![Diff-Guard Dashboard](dashboard.png)
+*(Note: Save your dashboard screenshot as `dashboard.png` in the repository root to render it here)*
+
+### Automated PR Comments
+When integrated via GitHub webhooks, Diff-Guard automatically posts a detailed markdown report directly on your Pull Requests, listing the affected downstream modules and functions at risk.
+
+![GitHub Action Report](github_action.png)
+*(Note: Save your GitHub Action/PR comment screenshot as `github_action.png` in the repository root to render it here)*
+
+---
+
+## 🚦 Understanding the Risk Score
+
+Diff-Guard calculates a **Risk Score (0-100)** to quantify the *architectural fragility* of a change. It doesn't measure code quality (like a linter), but rather how interconnected the modified code is. This helps teams prioritize code review time and testing resources.
+
+- 🟢 **Low Risk (0 - 49%) - *Isolated Change*:** 
+  The modified files are "leaf nodes" (e.g., standalone scripts, tests, isolated features) and have few downstream dependents.
+  - *Context:* Junior/mid-level engineers can confidently approve. Minimal regression testing needed.
+  
+- 🟡 **Medium Risk (50 - 79%) - *Moderate Dependency*:**
+  The change modifies components imported by multiple downstream modules, but isn't core infrastructure.
+  - *Context:* Reviewers should check the interfaces. QA should write or run integration tests specifically for the impacted downstream modules.
+
+- 🔴 **High Risk (80 - 100%) - *Core Infrastructure Change*:**
+  The modified code is highly centralized (e.g., database connection handler, core authentication module). A bug here will cascade through the entire system.
+  - *Context:* Requires a Senior Engineer or Tech Lead review. Meticulous backward compatibility checks and exhaustive regression test suites are justified.
 
 ---
 
 ## 🛠️ Architecture
 
-```
-                       [GitHub PR Event Webhook]
+```text
+                       [GitHub PR Event / Local Form Submit]
                                    │
                                    ▼
       ┌────────────────────────────┴────────────────────────────┐
@@ -37,7 +72,9 @@ Diff-Guard is a stateless, high-performance static analyzer and developer tool d
       └────────────────────────────┬────────────────────────────┘
                                    │
                                    ▼
-                       [GitHub PR Review Report]
+      ┌────────────────────────────┴────────────────────────────┐
+      │ Formatted JSON Response / Automated PR Comment          │
+      └─────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -58,29 +95,29 @@ To verify the parsing and graph reachability engine works end-to-end:
 python sandbox_test.py
 ```
 
-### 3. Start Webhook Server
+### 3. Start the Web Dashboard and API
 Start the Uvicorn-based FastAPI app locally:
 ```bash
-# Set your GitHub token if you wish to dispatch comments back to PRs
+# Set your GitHub token to increase API rate limits or dispatch PR comments
 export GITHUB_TOKEN="your_personal_access_token"
 
 # Run Uvicorn dev server
 uvicorn app:app --host 0.0.0.0 --port 8000 --reload
 ```
+Once running, open your browser and navigate to **`http://localhost:8000/dashboard/`** to access the interactive web interface.
 
 ---
 
-## 🕸️ API Webhook Endpoint
-The engine exposes a single endpoint to handle GitHub webhooks:
-- **Route:** `POST /webhook`
-- **Headers:** `X-GitHub-Event: pull_request`
-- **Payload Action Filters:** `opened`, `synchronize`, `reopened`
+## 🕸️ API Endpoints
+- **Webhook Endpoint:** `POST /webhook` (For automated GitHub PR analysis)
+- **Local Analysis Endpoint:** `POST /api/analyze` (For ad-hoc analysis via the dashboard)
 
 ---
 
 ## 📦 Directory Structure
-- [parser.py](file:///Users/agrimraj/Projects/Diff-Guard/parser.py): Tree-sitter parsing wrappers and function coordinate extractor.
-- [graph_engine.py](file:///Users/agrimraj/Projects/Diff-Guard/graph_engine.py): Dependency graph assembly and BFS tracer using networkx.
-- [streaming_client.py](file:///Users/agrimraj/Projects/Diff-Guard/streaming_client.py): In-memory sequential streaming and tar archive extractor.
-- [app.py](file:///Users/agrimraj/Projects/Diff-Guard/app.py): FastAPI web server and webhook pipeline controller.
-- [requirements.txt](file:///Users/agrimraj/Projects/Diff-Guard/requirements.txt): List of pinned project dependencies.
+- `frontend/`: React + Cytoscape UI (`App.js`, `style.css`, `index.html`).
+- `parser.py`: Tree-sitter parsing wrappers and function coordinate extractor.
+- `graph_engine.py`: Dependency graph assembly and BFS tracer using networkx.
+- `streaming_client.py`: In-memory sequential streaming and tar archive extractor.
+- `app.py`: FastAPI web server and webhook/dashboard pipeline controller.
+- `cli.py`: Command line interface for testing analyses locally.
