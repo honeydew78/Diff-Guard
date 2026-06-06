@@ -96,6 +96,16 @@ const Icons = {
             <line x1="10" y1="11" x2="10" y2="17"/>
             <line x1="14" y1="11" x2="14" y2="17"/>
         </svg>
+    `,
+    ChevronDown: ({ size = 16 }) => html`
+        <svg xmlns="http://www.w3.org/2000/svg" width=${size} height=${size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"/>
+        </svg>
+    `,
+    ChevronRight: ({ size = 16 }) => html`
+        <svg xmlns="http://www.w3.org/2000/svg" width=${size} height=${size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="9 18 15 12 9 6"/>
+        </svg>
     `
 };
 
@@ -109,6 +119,11 @@ export default function App() {
     const [selectedNode, setSelectedNode] = useState(null);
     const [activeTab, setActiveTab] = useState('summary'); // 'summary' or 'history'
     const [history, setHistory] = useState([]);
+    
+    // Collapsible sidebar section states
+    const [modifiedExpanded, setModifiedExpanded] = useState(true);
+    const [downstreamExpanded, setDownstreamExpanded] = useState(true);
+    const [entrypointsExpanded, setEntrypointsExpanded] = useState(true);
 
     const containerRef = useRef(null);
     const cyRef = useRef(null);
@@ -541,28 +556,45 @@ export default function App() {
                                 
                                 <!-- Changed Entities List -->
                                 <div style=${{flexGrow: 1, minHeight: '0', display: 'flex', flexDirection: 'column'}}>
-                                    <h3 style=${{fontSize: '0.8rem', color: 'var(--text-secondary)', textTransform: 'uppercase', marginBottom: '10px'}}>Modified Semantic Files</h3>
-                                    <div className="file-list" style=${{overflowY: 'auto', maxHeight: '250px'}}>
-                                        ${data.modified_files.length === 0 ? html`
-                                            <div className="empty-state" style=${{padding: '10px'}}>No Python modifications.</div>
-                                        ` : data.modified_files.map(item => html`
-                                            <div 
-                                                key=${item.file} 
-                                                className="file-item ${selectedNode?.id === item.file ? 'selected' : ''}"
-                                                onClick=${() => setSelectedNode({ id: item.file, isModified: true, isImpacted: false })}
-                                            >
-                                                <div className="file-item-header">
-                                                    <span className="file-name" title=${item.file}>${item.file}</span>
-                                                    <span className="file-badge modified">Modified</span>
-                                                </div>
-                                                <div className="entity-tags">
-                                                    ${item.changed_entities.map(e => html`
-                                                        <span key=${e.entity} className="entity-tag">${e.entity}</span>
-                                                    `)}
-                                                </div>
-                                            </div>
-                                        `)}
+                                    <div 
+                                        onClick=${() => setModifiedExpanded(!modifiedExpanded)} 
+                                        style=${{
+                                            display: 'flex', 
+                                            justifyContent: 'space-between', 
+                                            alignItems: 'center', 
+                                            cursor: 'pointer', 
+                                            userSelect: 'none',
+                                            marginBottom: '10px'
+                                        }}
+                                    >
+                                        <h3 style=${{fontSize: '0.8rem', color: 'var(--text-secondary)', textTransform: 'uppercase', margin: 0}}>Modified Semantic Files</h3>
+                                        <span style=${{color: 'var(--text-muted)', display: 'flex', alignItems: 'center'}}>
+                                            <${modifiedExpanded ? Icons.ChevronDown : Icons.ChevronRight} size=${14} />
+                                        </span>
                                     </div>
+                                    ${modifiedExpanded && html`
+                                        <div className="file-list" style=${{overflowY: 'auto', maxHeight: '250px'}}>
+                                            ${data.modified_files.length === 0 ? html`
+                                                <div className="empty-state" style=${{padding: '10px'}}>No Python modifications.</div>
+                                            ` : data.modified_files.map(item => html`
+                                                <div 
+                                                    key=${item.file} 
+                                                    className="file-item ${selectedNode?.id === item.file ? 'selected' : ''}"
+                                                    onClick=${() => setSelectedNode({ id: item.file, isModified: true, isImpacted: false })}
+                                                >
+                                                    <div className="file-item-header">
+                                                        <span className="file-name" title=${item.file}>${item.file}</span>
+                                                        <span className="file-badge modified">Modified</span>
+                                                    </div>
+                                                    <div className="entity-tags">
+                                                        ${item.changed_entities.map(e => html`
+                                                            <span key=${e.entity} className="entity-tag">${e.entity}</span>
+                                                        `)}
+                                                    </div>
+                                                </div>
+                                            `)}
+                                        </div>
+                                    `}
                                 </div>
                             `
                         ) : html`
@@ -718,66 +750,100 @@ export default function App() {
                             <!-- Impacted Files List -->
                             <div style=${{display: 'flex', flexDirection: 'column', gap: '16px'}}>
                                 <div>
-                                    <h3 style=${{fontSize: '0.8rem', color: 'var(--text-secondary)', textTransform: 'uppercase', marginBottom: '4px'}}>Affected Downstream Modules</h3>
-                                    <p style=${{fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '10px'}}>These files import elements of changed files directly or transitively.</p>
-                                    
-                                    <div className="file-list" style=${{overflowY: 'auto', maxHeight: '220px'}}>
-                                        ${data.all_impacted_files.length === 0 ? html`
-                                            <div className="empty-state" style=${{padding: '10px'}}>🟢 No downstream modules impacted!</div>
-                                        ` : data.all_impacted_files.map(file => {
-                                            const atRiskFuncs = data.at_risk_functions[file] || [];
-                                            return html`
-                                                <div 
-                                                    key=${file} 
-                                                    className="file-item ${selectedNode?.id === file ? 'selected' : ''}"
-                                                    onClick=${() => setSelectedNode({ id: file, isModified: false, isImpacted: true })}
-                                                >
-                                                    <div className="file-item-header">
-                                                        <span className="file-name" title=${file}>${file}</span>
-                                                        <span className="file-badge impacted">Impacted</span>
-                                                    </div>
-                                                    ${atRiskFuncs.length > 0 && html`
-                                                        <div className="entity-tags">
-                                                            ${atRiskFuncs.map(f => html`
-                                                                <span key=${f} className="entity-tag" style=${{color: 'var(--color-danger)', background: 'rgba(239, 68, 68, 0.05)'}}>${f}()</span>
-                                                            `)}
-                                                        </div>
-                                                    `}
-                                                </div>
-                                            `;
-                                        })}
+                                    <div 
+                                        onClick=${() => setDownstreamExpanded(!downstreamExpanded)} 
+                                        style=${{
+                                            display: 'flex', 
+                                            justifyContent: 'space-between', 
+                                            alignItems: 'center', 
+                                            cursor: 'pointer', 
+                                            userSelect: 'none',
+                                            marginBottom: '10px'
+                                        }}
+                                    >
+                                        <h3 style=${{fontSize: '0.8rem', color: 'var(--text-secondary)', textTransform: 'uppercase', margin: 0}}>Affected Downstream Modules</h3>
+                                        <span style=${{color: 'var(--text-muted)', display: 'flex', alignItems: 'center'}}>
+                                            <${downstreamExpanded ? Icons.ChevronDown : Icons.ChevronRight} size=${14} />
+                                        </span>
                                     </div>
-                                </div>
-                                
-                                ${data.impacted_apis && data.impacted_apis.length > 0 && html`
-                                    <div style=${{marginTop: '4px'}}>
-                                        <h3 style=${{fontSize: '0.8rem', color: '#f87171', textTransform: 'uppercase', marginBottom: '4px'}}>
-                                            🚨 Impacted Public Entrypoints
-                                        </h3>
-                                        <p style=${{fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '10px'}}>These Web APIs and CLI commands are in the blast radius.</p>
-                                        
-                                        <div className="file-list" style=${{overflowY: 'auto', maxHeight: '180px'}}>
-                                            ${data.impacted_apis.map((api, idx) => {
-                                                let badgeStyle = { marginRight: '6px', fontWeight: 700, padding: '2px 6px', borderRadius: '4px', fontSize: '0.65rem' };
-                                                if (api.method === 'GET') { badgeStyle = {...badgeStyle, background: 'rgba(16, 185, 129, 0.15)', color: '#34d399', border: '1px solid rgba(16, 185, 129, 0.3)'}; }
-                                                else if (api.method === 'POST') { badgeStyle = {...badgeStyle, background: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa', border: '1px solid rgba(59, 130, 246, 0.3)'}; }
-                                                else if (api.method === 'DELETE') { badgeStyle = {...badgeStyle, background: 'rgba(239, 68, 68, 0.15)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.3)'}; }
-                                                else { badgeStyle = {...badgeStyle, background: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24', border: '1px solid rgba(245, 158, 11, 0.3)'}; }
-                                                
+                                    
+                                    ${downstreamExpanded && html`
+                                        <p style=${{fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '10px'}}>These files import elements of changed files directly or transitively.</p>
+                                        <div className="file-list" style=${{overflowY: 'auto', maxHeight: '220px'}}>
+                                            ${data.all_impacted_files.length === 0 ? html`
+                                                <div className="empty-state" style=${{padding: '10px'}}>🟢 No downstream modules impacted!</div>
+                                            ` : data.all_impacted_files.map(file => {
+                                                const atRiskFuncs = data.at_risk_functions[file] || [];
                                                 return html`
-                                                    <div key=${idx} className="file-item" onClick=${() => setSelectedNode({ id: api.file, isModified: false, isImpacted: true })}>
-                                                        <div className="file-item-header" style=${{marginBottom: '6px'}}>
-                                                            <span style=${badgeStyle}>${api.method}</span>
-                                                            <span className="file-name" style=${{color: '#f3f4f6', fontFamily: 'monospace', fontSize: '0.75rem'}} title=${api.path}>${api.path}</span>
+                                                    <div 
+                                                        key=${file} 
+                                                        className="file-item ${selectedNode?.id === file ? 'selected' : ''}"
+                                                        onClick=${() => setSelectedNode({ id: file, isModified: false, isImpacted: true })}
+                                                    >
+                                                        <div className="file-item-header">
+                                                            <span className="file-name" title=${file}>${file}</span>
+                                                            <span className="file-badge impacted">Impacted</span>
                                                         </div>
-                                                        <div style=${{fontSize: '0.7rem', color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between'}}>
-                                                            <span>via <code>${api.function}()</code></span>
-                                                            <span title=${api.file}>...${api.file.split('/').pop()}</span>
-                                                        </div>
+                                                        ${atRiskFuncs.length > 0 && html`
+                                                            <div className="entity-tags">
+                                                                ${atRiskFuncs.map(f => html`
+                                                                    <span key=${f} className="entity-tag" style=${{color: 'var(--color-danger)', background: 'rgba(239, 68, 68, 0.05)'}}>${f}()</span>
+                                                                `)}
+                                                            </div>
+                                                        `}
                                                     </div>
                                                 `;
                                             })}
                                         </div>
+                                    `}
+                                </div>
+                                
+                                ${data.impacted_apis && data.impacted_apis.length > 0 && html`
+                                    <div style=${{marginTop: '16px'}}>
+                                        <div 
+                                            onClick=${() => setEntrypointsExpanded(!entrypointsExpanded)} 
+                                            style=${{
+                                                display: 'flex', 
+                                                justifyContent: 'space-between', 
+                                                alignItems: 'center', 
+                                                cursor: 'pointer', 
+                                                userSelect: 'none',
+                                                marginBottom: '10px'
+                                            }}
+                                        >
+                                            <h3 style=${{fontSize: '0.8rem', color: '#f87171', textTransform: 'uppercase', margin: 0}}>
+                                                🚨 Impacted Public Entrypoints
+                                            </h3>
+                                            <span style=${{color: 'var(--text-muted)', display: 'flex', alignItems: 'center'}}>
+                                                <${entrypointsExpanded ? Icons.ChevronDown : Icons.ChevronRight} size=${14} />
+                                            </span>
+                                        </div>
+                                        
+                                        ${entrypointsExpanded && html`
+                                            <p style=${{fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '10px'}}>These Web APIs and CLI commands are in the blast radius.</p>
+                                            <div className="file-list" style=${{overflowY: 'auto', maxHeight: '180px'}}>
+                                                ${data.impacted_apis.map((api, idx) => {
+                                                    let badgeStyle = { marginRight: '6px', fontWeight: 700, padding: '2px 6px', borderRadius: '4px', fontSize: '0.65rem' };
+                                                    if (api.method === 'GET') { badgeStyle = {...badgeStyle, background: 'rgba(16, 185, 129, 0.15)', color: '#34d399', border: '1px solid rgba(16, 185, 129, 0.3)'}; }
+                                                    else if (api.method === 'POST') { badgeStyle = {...badgeStyle, background: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa', border: '1px solid rgba(59, 130, 246, 0.3)'}; }
+                                                    else if (api.method === 'DELETE') { badgeStyle = {...badgeStyle, background: 'rgba(239, 68, 68, 0.15)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.3)'}; }
+                                                    else { badgeStyle = {...badgeStyle, background: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24', border: '1px solid rgba(245, 158, 11, 0.3)'}; }
+                                                    
+                                                    return html`
+                                                        <div key=${idx} className="file-item" onClick=${() => setSelectedNode({ id: api.file, isModified: false, isImpacted: true })}>
+                                                            <div className="file-item-header" style=${{marginBottom: '6px'}}>
+                                                                <span style=${badgeStyle}>${api.method}</span>
+                                                                <span className="file-name" style=${{color: '#f3f4f6', fontFamily: 'monospace', fontSize: '0.75rem'}} title=${api.path}>${api.path}</span>
+                                                            </div>
+                                                            <div style=${{fontSize: '0.7rem', color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between'}}>
+                                                                <span>via <code>${api.function}()</code></span>
+                                                                <span title=${api.file}>...${api.file.split('/').pop()}</span>
+                                                            </div>
+                                                        </div>
+                                                    `;
+                                                })}
+                                            </div>
+                                        `}
                                     </div>
                                 `}
                             </div>
