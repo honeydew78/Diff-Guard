@@ -3,7 +3,7 @@ import asyncio
 import difflib
 import concurrent.futures
 from fastapi import FastAPI, Request, BackgroundTasks, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import httpx
@@ -464,5 +464,9 @@ async def api_analyze(req: AnalyzeRequest):
     except Exception as e:
         print(f"[Diff-Guard API Error] {e}")
         raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/")
+async def root_redirect():
+    return RedirectResponse(url="/dashboard/")
 
 app.mount("/dashboard", StaticFiles(directory="frontend", html=True), name="frontend")
