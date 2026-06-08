@@ -315,6 +315,65 @@ class AnalyzeRequest(BaseModel):
     base: str
     head: str
 
+@app.get("/api/branches")
+async def api_get_branches(repo_url: str):
+    try:
+        owner, repo_name = parse_github_url(repo_url)
+        url = f"https://api.github.com/repos/{owner}/{repo_name}/branches"
+        headers = {
+            "Accept": "application/vnd.github.v3+json",
+            "User-Agent": "Diff-Guard"
+        }
+        if GITHUB_TOKEN:
+            headers["Authorization"] = f"Bearer {GITHUB_TOKEN}"
+            
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url, headers=headers, params={"per_page": 100})
+            if resp.status_code != 200:
+                raise HTTPException(status_code=resp.status_code, detail=f"Failed to fetch branches: {resp.text}")
+                
+            branches_data = resp.json()
+            formatted_branches = [b["name"] for b in branches_data]
+            return {"branches": formatted_branches}
+    except Exception as e:
+        print(f"[Diff-Guard API Error] {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/api/commits")
+async def api_get_commits(repo_url: str, branch: str = None):
+    try:
+        owner, repo_name = parse_github_url(repo_url)
+        url = f"https://api.github.com/repos/{owner}/{repo_name}/commits"
+        headers = {
+            "Accept": "application/vnd.github.v3+json",
+            "User-Agent": "Diff-Guard"
+        }
+        if GITHUB_TOKEN:
+            headers["Authorization"] = f"Bearer {GITHUB_TOKEN}"
+            
+        params = {"per_page": 50}
+        if branch:
+            params["sha"] = branch
+            
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url, headers=headers, params=params)
+            if resp.status_code != 200:
+                raise HTTPException(status_code=resp.status_code, detail=f"Failed to fetch commits: {resp.text}")
+                
+            commits_data = resp.json()
+            formatted_commits = []
+            for c in commits_data:
+                formatted_commits.append({
+                    "sha": c["sha"],
+                    "message": c["commit"]["message"].split("\n")[0],
+                    "author": c["commit"]["author"]["name"],
+                    "date": c["commit"]["author"]["date"]
+                })
+            return {"commits": formatted_commits}
+    except Exception as e:
+        print(f"[Diff-Guard API Error] {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
 @app.post("/api/analyze")
 async def api_analyze(req: AnalyzeRequest):
     try:

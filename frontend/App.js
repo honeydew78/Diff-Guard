@@ -102,6 +102,13 @@ const Icons = {
             <polyline points="6 9 12 15 18 9"/>
         </svg>
     `,
+    GitCommit: () => html`
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="4"/>
+            <line x1="1.05" y1="12" x2="7" y2="12"/>
+            <line x1="17.01" y1="12" x2="22.96" y2="12"/>
+        </svg>
+    `,
     ChevronRight: ({ size = 16 }) => html`
         <svg xmlns="http://www.w3.org/2000/svg" width=${size} height=${size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="9 18 15 12 9 6"/>
@@ -120,6 +127,14 @@ export default function App() {
     const [activeTab, setActiveTab] = useState('summary'); // 'summary' or 'history'
     const [history, setHistory] = useState([]);
     const [drawerTab, setDrawerTab] = useState('modified');
+    
+    // Commit Browser State
+    const [showCommitBrowser, setShowCommitBrowser] = useState(false);
+    const [commits, setCommits] = useState([]);
+    const [commitsLoading, setCommitsLoading] = useState(false);
+    const [branches, setBranches] = useState([]);
+    const [selectedBranch, setSelectedBranch] = useState('');
+    const [branchesLoading, setBranchesLoading] = useState(false);
     
     // Collapsible sidebar section states
     const [modifiedExpanded, setModifiedExpanded] = useState(true);
@@ -243,6 +258,74 @@ export default function App() {
             window.lucide.createIcons();
         }
     });
+
+    const openCommitBrowser = async () => {
+        setShowCommitBrowser(true);
+        setBranchesLoading(true);
+        try {
+            const branchRes = await fetch('/api/branches?repo_url=' + encodeURIComponent(repoUrl));
+            if (branchRes.ok) {
+                const branchData = await branchRes.json();
+                setBranches(branchData.branches || []);
+            }
+            setSelectedBranch('');
+            fetchCommitsForBranch('');
+        } catch (err) {
+            console.error("Failed to load branches", err);
+            fetchCommitsForBranch(''); 
+        } finally {
+            setBranchesLoading(false);
+        }
+    };
+
+    const fetchCommitsForBranch = async (branchName) => {
+        setCommitsLoading(true);
+        try {
+            const url = `/api/commits?repo_url=${encodeURIComponent(repoUrl)}${branchName ? '&branch=' + encodeURIComponent(branchName) : ''}`;
+            const response = await fetch(url);
+            if (!response.ok) {
+                const errData = await response.json();
+                throw new Error(errData.detail || 'Failed to fetch commits');
+            }
+            const result = await response.json();
+            setCommits(result.commits);
+        } catch (err) {
+            console.error(err);
+            alert("Error fetching commits: " + err.message);
+        } finally {
+            setCommitsLoading(false);
+        }
+    };
+
+    const handleBranchChange = (e) => {
+        const newBranch = e.target.value;
+        setSelectedBranch(newBranch);
+        fetchCommitsForBranch(newBranch);
+    };
+
+    const handleSetBase = (sha, index) => {
+        setBase(sha);
+        const headIndex = commits.findIndex(c => c.sha === head);
+        if (headIndex !== -1 && index <= headIndex) {
+            if (index > 0) {
+                setHead(commits[index - 1].sha);
+            } else {
+                setHead('');
+            }
+        }
+    };
+
+    const handleSetHead = (sha, index) => {
+        setHead(sha);
+        const baseIndex = commits.findIndex(c => c.sha === base);
+        if (baseIndex !== -1 && index >= baseIndex) {
+            if (index < commits.length - 1) {
+                setBase(commits[index + 1].sha);
+            } else {
+                setBase('');
+            }
+        }
+    };
 
     const handleAnalyze = async (e) => {
         if (e) e.preventDefault();
@@ -548,6 +631,11 @@ export default function App() {
                             required
                         />
                     </div>
+                    
+                    <button type="button" className="btn-secondary" onClick=${openCommitBrowser} disabled=${loading || !repoUrl}>
+                        <${Icons.GitCommit} />
+                        Browse
+                    </button>
                     
                     <button type="submit" className="btn-analyze" disabled=${loading}>
                         <${Icons.Play} />
@@ -902,6 +990,64 @@ export default function App() {
                     </section>
                 </div>
             </main>
+
+            ${showCommitBrowser && html`
+                <div className="modal-overlay" onClick=${() => setShowCommitBrowser(false)}>
+                    <div className="modal-container glass-panel" onClick=${e => e.stopPropagation()}>
+                        <div className="modal-header">
+                            <h2 style=${{display: 'flex', alignItems: 'center', gap: '8px', fontSize: '1.2rem'}}>
+                                <${Icons.GitCommit} />
+                                Commit History
+                            </h2>
+                            <div style=${{display: 'flex', alignItems: 'center', gap: '12px'}}>
+                                ${branches.length > 0 && html`
+                                    <select 
+                                        className="branch-select"
+                                        value=${selectedBranch} 
+                                        onChange=${handleBranchChange}
+                                        disabled=${commitsLoading}
+                                    >
+                                        <option value="">Default Branch</option>
+                                        ${branches.map(b => html`<option key=${b} value=${b}>${b}</option>`)}
+                                    </select>
+                                `}
+                                <button className="btn-close" onClick=${() => setShowCommitBrowser(false)}>
+                                    <${Icons.X} />
+                                </button>
+                            </div>
+                        </div>
+                        <div className="modal-body">
+                            ${commitsLoading || branchesLoading ? html`
+                                <div className="loading-overlay" style=${{position: 'relative', height: '200px', background: 'transparent'}}>
+                                    <div className="spinner"></div>
+                                    <span>Fetching commits...</span>
+                                </div>
+                            ` : commits.length === 0 ? html`
+                                <div className="empty-state">No commits found.</div>
+                            ` : html`
+                                <div className="commit-timeline">
+                                    ${commits.map((c, index) => html`
+                                        <div key=${c.sha} className="commit-item">
+                                            <div className="commit-info">
+                                                <div className="commit-message">${c.message}</div>
+                                                <div className="commit-meta">
+                                                    <span className="commit-author">${c.author}</span>
+                                                    <span className="commit-date">${new Date(c.date).toLocaleString()}</span>
+                                                    <span className="commit-sha">${c.sha.substring(0, 7)}</span>
+                                                </div>
+                                            </div>
+                                            <div className="commit-actions">
+                                                <button type="button" className="btn-commit-action ${base === c.sha ? 'active' : ''}" onClick=${() => handleSetBase(c.sha, index)}>Base</button>
+                                                <button type="button" className="btn-commit-action ${head === c.sha ? 'active' : ''}" onClick=${() => handleSetHead(c.sha, index)}>Head</button>
+                                            </div>
+                                        </div>
+                                    `)}
+                                </div>
+                            `}
+                        </div>
+                    </div>
+                </div>
+            `}
         </div>
     `;
 }
