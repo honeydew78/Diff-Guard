@@ -1,6 +1,5 @@
 import networkx as nx
-import tree_sitter_languages
-from parser import get_ast_parser, parse_code
+from languages import registry
 
 def resolve_relative_import(current_file_path: str, import_from_name: str) -> str:
     """
@@ -53,51 +52,29 @@ def build_dependency_graph(files_data: dict) -> nx.DiGraph:
     Edges point from the dependency target (supplier) to the file importing it (consumer).
     """
     graph = nx.DiGraph()
-    module_to_file = {}
     
-    # 1. Register file paths as nodes and build module map
+    # 1. Register supported files as nodes
     for file_path in files_data.keys():
-        graph.add_node(file_path)
-        
-        normalized = file_path.replace("\\", "/")
-        if normalized.endswith(".py"):
-            normalized = normalized[:-3]
-        if normalized.endswith("/__init__"):
-            normalized = normalized[:-9]
-            
-        module_name = normalized.replace("/", ".")
-        # Strip leading dots or directory indicators
-        if module_name.startswith("."):
-            module_name = module_name.lstrip(".")
-            
-        module_to_file[module_name] = file_path
+        if registry.is_supported(file_path):
+            graph.add_node(file_path)
 
-    # 2. Extract and resolve imports
-    parser = get_ast_parser("python")
-    import_query_str = """
-    (import_statement name: (dotted_name) @import_name)
-    (import_from_statement module_name: [(dotted_name) (relative_import)] @import_from_name)
-    """
-    lang = tree_sitter_languages.get_language("python")
-    query = lang.query(import_query_str)
-    
+    # 2. Extract and resolve imports using registered language providers
     for file_path, code_bytes in files_data.items():
-        root = parse_code(code_bytes, parser)
-        captures = query.captures(root)
-        
-        for node, capture_name in captures:
-            raw_import = code_bytes[node.start_byte:node.end_byte].decode("utf-8")
+        if not registry.is_supported(file_path):
+            continue
             
-            if capture_name == "import_from_name" and raw_import.startswith("."):
-                resolved_module = resolve_relative_import(file_path, raw_import)
-            else:
-                resolved_module = raw_import
-                
-            dep_file = find_matching_file(resolved_module, module_to_file)
-            if dep_file and dep_file != file_path:
-                # Add edge from supplier -> consumer
-                graph.add_edge(dep_file, file_path)
-                
+        provider = registry.get_provider_for_file(file_path)
+        if not provider:
+            continue
+            
+        raw_imports = provider.extract_imports(code_bytes, file_path)
+        for imp in raw_imports:
+            dep_files = provider.resolve_import_to_file(imp, file_path, files_data)
+            for dep_file in dep_files:
+                if dep_file and dep_file != file_path:
+                    # Add edge from supplier -> consumer
+                    graph.add_edge(dep_file, file_path)
+                    
     return graph
 
 def get_impacted_files(graph: nx.DiGraph, changed_file: str) -> set:

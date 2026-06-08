@@ -8,6 +8,7 @@ from app import get_changed_line_numbers, format_markdown_report, post_comment_t
 from graph_engine import build_dependency_graph, get_impacted_files
 from parser import extract_functions, find_functions_using_symbol
 import networkx as nx
+from languages import registry
 
 def git_list_files(repo_path: str, commit: str) -> list[str]:
     """
@@ -22,7 +23,7 @@ def git_list_files(repo_path: str, commit: str) -> list[str]:
             check=True,
             text=True
         )
-        return [line.strip() for line in result.stdout.splitlines() if line.strip().endswith(".py")]
+        return [line.strip() for line in result.stdout.splitlines() if registry.is_supported(line.strip())]
     except subprocess.CalledProcessError as e:
         print(f"Error listing files for commit {commit}: {e.stderr.strip()}", file=sys.stderr)
         sys.exit(1)
@@ -58,7 +59,7 @@ def git_diff_files(repo_path: str, base: str, head: str) -> list[str]:
             check=True,
             text=True
         )
-        return [line.strip() for line in result.stdout.splitlines() if line.strip().endswith(".py")]
+        return [line.strip() for line in result.stdout.splitlines() if registry.is_supported(line.strip())]
     except subprocess.CalledProcessError as e:
         print(f"Error running git diff: {e.stderr.strip()}", file=sys.stderr)
         sys.exit(1)
@@ -87,14 +88,14 @@ def run_analysis(repo_path: str, base: str, head: str) -> str:
         
         if not base_code:
             # File newly added in head
-            head_funcs = extract_functions(head_code, "python")
+            head_funcs = extract_functions(head_code, file_path=file_path)
             changed_funcs = [(f_name, "added") for f_name in head_funcs.keys()]
             if changed_funcs:
                 modified_files.append(file_path)
                 modified_functions_by_file[file_path] = changed_funcs
         elif not head_code:
             # File deleted in head
-            base_funcs = extract_functions(base_code, "python")
+            base_funcs = extract_functions(base_code, file_path=file_path)
             changed_funcs = [(f_name, "deleted") for f_name in base_funcs.keys()]
             if changed_funcs:
                 modified_files.append(file_path)
@@ -102,8 +103,8 @@ def run_analysis(repo_path: str, base: str, head: str) -> str:
         else:
             # File modified
             if base_code != head_code:
-                base_funcs = extract_functions(base_code, "python")
-                head_funcs = extract_functions(head_code, "python")
+                base_funcs = extract_functions(base_code, file_path=file_path)
+                head_funcs = extract_functions(head_code, file_path=file_path)
                 
                 base_changed, head_changed = get_changed_line_numbers(base_code, head_code)
                 changed_funcs = []
@@ -156,7 +157,7 @@ def run_analysis(repo_path: str, base: str, head: str) -> str:
                 if code_bytes:
                     for c_func_name, c_type in changed_entities:
                         if c_type in ("modified", "deleted"):
-                            found_funcs = find_functions_using_symbol(code_bytes, c_func_name)
+                            found_funcs = find_functions_using_symbol(code_bytes, c_func_name, file_path=imp_file)
                             if found_funcs:
                                 if imp_file not in at_risk_functions:
                                     at_risk_functions[imp_file] = []
@@ -172,7 +173,7 @@ def run_analysis(repo_path: str, base: str, head: str) -> str:
     for imp_file, funcs in at_risk_functions.items():
         code_bytes = git_show(repo_path, head, imp_file)
         if code_bytes:
-            routes = extract_api_routes(code_bytes)
+            routes = extract_api_routes(code_bytes, file_path=imp_file)
             for f in funcs:
                 if f in routes:
                     impacted_apis.append({
