@@ -83,8 +83,8 @@ def analyze_diff_and_report(payload: dict):
                 head_code = head_files[file_path]
                 if base_code != head_code:
                     # Ingest code and extract function boundary definitions
-                    base_funcs = extract_functions(base_code, "python")
-                    head_funcs = extract_functions(head_code, "python")
+                    base_funcs = extract_functions(base_code, file_path=file_path)
+                    head_funcs = extract_functions(head_code, file_path=file_path)
                     
                     # Calculate exact line changes between base and head
                     base_changed, head_changed = get_changed_line_numbers(base_code, head_code)
@@ -146,7 +146,7 @@ def analyze_diff_and_report(payload: dict):
                     if code_bytes:
                         for c_func_name, c_type in changed_entities:
                             if c_type in ("modified", "deleted"):
-                                found_funcs = find_functions_using_symbol(code_bytes, c_func_name)
+                                found_funcs = find_functions_using_symbol(code_bytes, c_func_name, file_path=imp_file)
                                 if found_funcs:
                                     if imp_file not in at_risk_functions:
                                         at_risk_functions[imp_file] = []
@@ -158,7 +158,7 @@ def analyze_diff_and_report(payload: dict):
             
         all_api_routes = {}
         for f_path, h_code in head_files.items():
-            routes = extract_api_routes(h_code)
+            routes = extract_api_routes(h_code, file_path=f_path)
             for f_name, r_info in routes.items():
                 all_api_routes[(f_path, f_name)] = r_info
                 
@@ -219,7 +219,7 @@ def format_markdown_report(
     
     md += "### 🔍 Modified Semantic Entities\n"
     if not modified_files:
-        md += "_No Python code modifications detected._\n"
+        md += "_No supported code modifications detected._\n"
     else:
         md += "| File | Entity | Change Type |\n"
         md += "| --- | --- | --- |\n"
@@ -337,8 +337,8 @@ async def api_analyze(req: AnalyzeRequest):
             else:
                 head_code = head_files[file_path]
                 if base_code != head_code:
-                    base_funcs = extract_functions(base_code, "python")
-                    head_funcs = extract_functions(head_code, "python")
+                    base_funcs = extract_functions(base_code, file_path=file_path)
+                    head_funcs = extract_functions(head_code, file_path=file_path)
                     base_changed, head_changed = get_changed_line_numbers(base_code, head_code)
                     changed_funcs = []
                     
@@ -386,7 +386,7 @@ async def api_analyze(req: AnalyzeRequest):
                     if code_bytes:
                         for c_func_name, c_type in changed_entities:
                             if c_type in ("modified", "deleted"):
-                                found_funcs = find_functions_using_symbol(code_bytes, c_func_name)
+                                found_funcs = find_functions_using_symbol(code_bytes, c_func_name, file_path=imp_file)
                                 if found_funcs:
                                     if imp_file not in at_risk_functions:
                                         at_risk_functions[imp_file] = []
@@ -397,7 +397,7 @@ async def api_analyze(req: AnalyzeRequest):
             
         all_api_routes = {}
         for f_path, h_code in head_files.items():
-            routes = extract_api_routes(h_code)
+            routes = extract_api_routes(h_code, file_path=f_path)
             for f_name, r_info in routes.items():
                 all_api_routes[(f_path, f_name)] = r_info
                 
