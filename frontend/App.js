@@ -110,9 +110,9 @@ const Icons = {
 };
 
 export default function App() {
-    const [repoUrl, setRepoUrl] = useState('https://github.com/pallets/flask');
-    const [base, setBase] = useState('2.3.0');
-    const [head, setHead] = useState('3.0.0');
+    const [repoUrl, setRepoUrl] = useState(() => localStorage.getItem('diff_guard_repo_url') || 'https://github.com/pallets/flask');
+    const [base, setBase] = useState(() => localStorage.getItem('diff_guard_base_ref') || '2.3.0');
+    const [head, setHead] = useState(() => localStorage.getItem('diff_guard_head_ref') || '3.0.0');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
     const [data, setData] = useState(null);
@@ -128,6 +128,35 @@ export default function App() {
     const containerRef = useRef(null);
     const cyRef = useRef(null);
 
+    const getLanguageGroup = (filePath) => {
+        const ext = filePath.split('.').pop().toLowerCase();
+        if (['py'].includes(ext)) return 'Python';
+        if (['js', 'jsx', 'ts', 'tsx'].includes(ext)) return 'JavaScript/TypeScript';
+        if (['go'].includes(ext)) return 'Go';
+        return 'Other';
+    };
+
+    let groupedModified = {};
+    let groupedImpacted = {};
+    if (data) {
+        if (data.modified_files) {
+            groupedModified = data.modified_files.reduce((acc, item) => {
+                const lang = getLanguageGroup(item.file);
+                if (!acc[lang]) acc[lang] = [];
+                acc[lang].push(item);
+                return acc;
+            }, {});
+        }
+        if (data.all_impacted_files) {
+            groupedImpacted = data.all_impacted_files.reduce((acc, file) => {
+                const lang = getLanguageGroup(file);
+                if (!acc[lang]) acc[lang] = [];
+                acc[lang].push(file);
+                return acc;
+            }, {});
+        }
+    }
+
     // Load history from localStorage on mount
     useEffect(() => {
         const storedHistory = localStorage.getItem('diff_guard_history');
@@ -139,6 +168,13 @@ export default function App() {
             }
         }
     }, []);
+
+    // Persist input values to localStorage on change
+    useEffect(() => {
+        localStorage.setItem('diff_guard_repo_url', repoUrl);
+        localStorage.setItem('diff_guard_base_ref', base);
+        localStorage.setItem('diff_guard_head_ref', head);
+    }, [repoUrl, base, head]);
 
     const saveToHistory = (url, b, h, result) => {
         let repoName = url;
@@ -575,22 +611,41 @@ export default function App() {
                                     ${modifiedExpanded && html`
                                         <div className="file-list" style=${{overflowY: 'auto', maxHeight: '250px'}}>
                                             ${data.modified_files.length === 0 ? html`
-                                                <div className="empty-state" style=${{padding: '10px'}}>No Python modifications.</div>
-                                            ` : data.modified_files.map(item => html`
-                                                <div 
-                                                    key=${item.file} 
-                                                    className="file-item ${selectedNode?.id === item.file ? 'selected' : ''}"
-                                                    onClick=${() => setSelectedNode({ id: item.file, isModified: true, isImpacted: false })}
-                                                >
-                                                    <div className="file-item-header">
-                                                        <span className="file-name" title=${item.file}>${item.file}</span>
-                                                        <span className="file-badge modified">Modified</span>
+                                                <div className="empty-state" style=${{padding: '10px'}}>No modifications detected.</div>
+                                            ` : Object.entries(groupedModified).map(([lang, items]) => html`
+                                                <div key=${lang} style=${{marginBottom: '12px'}}>
+                                                    <div style=${{
+                                                        fontSize: '0.7rem', 
+                                                        fontWeight: '700', 
+                                                        color: 'var(--text-muted)', 
+                                                        marginBottom: '6px', 
+                                                        padding: '4px 8px', 
+                                                        background: 'rgba(255, 255, 255, 0.02)',
+                                                        borderRadius: '4px',
+                                                        display: 'flex', 
+                                                        justifyContent: 'space-between',
+                                                        alignItems: 'center'
+                                                    }}>
+                                                        <span>${lang} Files</span>
+                                                        <span style=${{background: 'rgba(99, 102, 241, 0.15)', color: '#a5b4fc', borderRadius: '10px', padding: '0 6px', fontSize: '0.65rem'}}>${items.length}</span>
                                                     </div>
-                                                    <div className="entity-tags">
-                                                        ${item.changed_entities.map(e => html`
-                                                            <span key=${e.entity} className="entity-tag">${e.entity}</span>
-                                                        `)}
-                                                    </div>
+                                                    ${items.map(item => html`
+                                                        <div 
+                                                            key=${item.file} 
+                                                            className="file-item ${selectedNode?.id === item.file ? 'selected' : ''}"
+                                                            onClick=${() => setSelectedNode({ id: item.file, isModified: true, isImpacted: false })}
+                                                        >
+                                                            <div className="file-item-header">
+                                                                <span className="file-name" title=${item.file}>${item.file}</span>
+                                                                <span className="file-badge modified">Modified</span>
+                                                            </div>
+                                                            <div className="entity-tags">
+                                                                ${item.changed_entities.map(e => html`
+                                                                    <span key=${e.entity} className="entity-tag">${e.entity}</span>
+                                                                `)}
+                                                            </div>
+                                                        </div>
+                                                    `)}
                                                 </div>
                                             `)}
                                         </div>
@@ -772,28 +827,47 @@ export default function App() {
                                         <div className="file-list" style=${{overflowY: 'auto', maxHeight: '220px'}}>
                                             ${data.all_impacted_files.length === 0 ? html`
                                                 <div className="empty-state" style=${{padding: '10px'}}>🟢 No downstream modules impacted!</div>
-                                            ` : data.all_impacted_files.map(file => {
-                                                const atRiskFuncs = data.at_risk_functions[file] || [];
-                                                return html`
-                                                    <div 
-                                                        key=${file} 
-                                                        className="file-item ${selectedNode?.id === file ? 'selected' : ''}"
-                                                        onClick=${() => setSelectedNode({ id: file, isModified: false, isImpacted: true })}
-                                                    >
-                                                        <div className="file-item-header">
-                                                            <span className="file-name" title=${file}>${file}</span>
-                                                            <span className="file-badge impacted">Impacted</span>
-                                                        </div>
-                                                        ${atRiskFuncs.length > 0 && html`
-                                                            <div className="entity-tags">
-                                                                ${atRiskFuncs.map(f => html`
-                                                                    <span key=${f} className="entity-tag" style=${{color: 'var(--color-danger)', background: 'rgba(239, 68, 68, 0.05)'}}>${f}()</span>
-                                                                `)}
-                                                            </div>
-                                                        `}
+                                            ` : Object.entries(groupedImpacted).map(([lang, files]) => html`
+                                                <div key=${lang} style=${{marginBottom: '12px'}}>
+                                                    <div style=${{
+                                                        fontSize: '0.7rem', 
+                                                        fontWeight: '700', 
+                                                        color: 'var(--text-muted)', 
+                                                        marginBottom: '6px', 
+                                                        padding: '4px 8px', 
+                                                        background: 'rgba(255, 255, 255, 0.02)',
+                                                        borderRadius: '4px',
+                                                        display: 'flex', 
+                                                        justifyContent: 'space-between',
+                                                        alignItems: 'center'
+                                                    }}>
+                                                        <span>${lang} Files</span>
+                                                        <span style=${{background: 'rgba(99, 102, 241, 0.15)', color: '#a5b4fc', borderRadius: '10px', padding: '0 6px', fontSize: '0.65rem'}}>${files.length}</span>
                                                     </div>
-                                                `;
-                                            })}
+                                                    ${files.map(file => {
+                                                        const atRiskFuncs = data.at_risk_functions[file] || [];
+                                                        return html`
+                                                            <div 
+                                                                key=${file} 
+                                                                className="file-item ${selectedNode?.id === file ? 'selected' : ''}"
+                                                                onClick=${() => setSelectedNode({ id: file, isModified: false, isImpacted: true })}
+                                                            >
+                                                                <div className="file-item-header">
+                                                                    <span className="file-name" title=${file}>${file}</span>
+                                                                    <span className="file-badge impacted">Impacted</span>
+                                                                </div>
+                                                                ${atRiskFuncs.length > 0 && html`
+                                                                    <div className="entity-tags">
+                                                                        ${atRiskFuncs.map(f => html`
+                                                                            <span key=${f} className="entity-tag" style=${{color: 'var(--color-danger)', background: 'rgba(239, 68, 68, 0.05)'}}>${f}()</span>
+                                                                        `)}
+                                                                    </div>
+                                                                `}
+                                                            </div>
+                                                        `;
+                                                    })}
+                                                </div>
+                                            `)}
                                         </div>
                                     `}
                                 </div>
