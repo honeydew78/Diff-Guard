@@ -119,6 +119,7 @@ export default function App() {
     const [selectedNode, setSelectedNode] = useState(null);
     const [activeTab, setActiveTab] = useState('summary'); // 'summary' or 'history'
     const [history, setHistory] = useState([]);
+    const [drawerTab, setDrawerTab] = useState('modified');
     
     // Collapsible sidebar section states
     const [modifiedExpanded, setModifiedExpanded] = useState(true);
@@ -175,6 +176,13 @@ export default function App() {
         localStorage.setItem('diff_guard_base_ref', base);
         localStorage.setItem('diff_guard_head_ref', head);
     }, [repoUrl, base, head]);
+
+    // Automatically focus the inspector tab in bottom drawer when a node is selected
+    useEffect(() => {
+        if (selectedNode) {
+            setDrawerTab('inspector');
+        }
+    }, [selectedNode]);
 
     const saveToHistory = (url, b, h, result) => {
         let repoName = url;
@@ -404,6 +412,18 @@ export default function App() {
 
         cyRef.current = cy;
 
+        // Resize Observer to center and fit elements when container scales
+        const resizeObserver = new ResizeObserver(() => {
+            if (cy) {
+                cy.resize();
+                cy.fit(null, 30);
+            }
+        });
+        
+        if (containerRef.current) {
+            resizeObserver.observe(containerRef.current);
+        }
+
         // Select node
         cy.on('tap', 'node', (evt) => {
             const node = evt.target;
@@ -439,6 +459,7 @@ export default function App() {
         });
 
         return () => {
+            resizeObserver.disconnect();
             cy.destroy();
         };
     }, [data]);
@@ -537,7 +558,7 @@ export default function App() {
 
             <!-- Main Panel Split -->
             <main className="main-workspace">
-                <!-- Left Sidebar: Score + Modified Semantic Entities -->
+                <!-- Left Sidebar: Score & History -->
                 <aside className="sidebar glass-panel">
                     <div className="sidebar-tabs">
                         <button 
@@ -564,7 +585,7 @@ export default function App() {
                                     <span>Submit repo coordinates to load risk summary.</span>
                                 </div>
                             ` : html`
-                                <div className="risk-meter-container">
+                                <div className="risk-meter-container" style=${{borderBottom: 'none'}}>
                                     <div className="risk-circle">
                                         <svg className="risk-circle-svg" width="130" height="130">
                                             <circle className="risk-circle-bg" cx="65" cy="65" r="60"/>
@@ -588,66 +609,16 @@ export default function App() {
                                     <div className="risk-status-badge ${riskStatus}">
                                         ${data.status}
                                     </div>
-                                </div>
-                                
-                                <!-- Changed Entities List -->
-                                <div style=${{flexGrow: 1, minHeight: '0', display: 'flex', flexDirection: 'column'}}>
-                                    <div 
-                                        onClick=${() => setModifiedExpanded(!modifiedExpanded)} 
-                                        style=${{
-                                            display: 'flex', 
-                                            justifyContent: 'space-between', 
-                                            alignItems: 'center', 
-                                            cursor: 'pointer', 
-                                            userSelect: 'none',
-                                            marginBottom: '10px'
-                                        }}
-                                    >
-                                        <h3 style=${{fontSize: '0.8rem', color: 'var(--text-secondary)', textTransform: 'uppercase', margin: 0}}>Modified Semantic Files</h3>
-                                        <span style=${{color: 'var(--text-muted)', display: 'flex', alignItems: 'center'}}>
-                                            <${modifiedExpanded ? Icons.ChevronDown : Icons.ChevronRight} size=${14} />
-                                        </span>
-                                    </div>
-                                    ${modifiedExpanded && html`
-                                        <div className="file-list" style=${{overflowY: 'auto', maxHeight: '250px'}}>
-                                            ${data.modified_files.length === 0 ? html`
-                                                <div className="empty-state" style=${{padding: '10px'}}>No modifications detected.</div>
-                                            ` : Object.entries(groupedModified).map(([lang, items]) => html`
-                                                <div key=${lang} style=${{marginBottom: '12px'}}>
-                                                    <div style=${{
-                                                        fontSize: '0.7rem', 
-                                                        fontWeight: '700', 
-                                                        color: 'var(--text-muted)', 
-                                                        marginBottom: '6px', 
-                                                        padding: '4px 8px', 
-                                                        background: 'rgba(255, 255, 255, 0.02)',
-                                                        borderRadius: '4px',
-                                                        display: 'flex', 
-                                                        justifyContent: 'space-between',
-                                                        alignItems: 'center'
-                                                    }}>
-                                                        <span>${lang} Files</span>
-                                                        <span style=${{background: 'rgba(99, 102, 241, 0.15)', color: '#a5b4fc', borderRadius: '10px', padding: '0 6px', fontSize: '0.65rem'}}>${items.length}</span>
-                                                    </div>
-                                                    ${items.map(item => html`
-                                                        <div 
-                                                            key=${item.file} 
-                                                            className="file-item ${selectedNode?.id === item.file ? 'selected' : ''}"
-                                                            onClick=${() => setSelectedNode({ id: item.file, isModified: true, isImpacted: false })}
-                                                        >
-                                                            <div className="file-item-header">
-                                                                <span className="file-name" title=${item.file}>${item.file}</span>
-                                                                <span className="file-badge modified">Modified</span>
-                                                            </div>
-                                                            <div className="entity-tags">
-                                                                ${item.changed_entities.map(e => html`
-                                                                    <span key=${e.entity} className="entity-tag">${e.entity}</span>
-                                                                `)}
-                                                            </div>
-                                                        </div>
-                                                    `)}
-                                                </div>
-                                            `)}
+                                    ${data.summary_text && html`
+                                        <div className="summary-text" style=${{
+                                            marginTop: '20px', 
+                                            textAlign: 'center', 
+                                            color: 'var(--text-secondary)',
+                                            fontSize: '0.9rem',
+                                            lineHeight: '1.5',
+                                            maxWidth: '85%'
+                                        }}>
+                                            ${data.summary_text}
                                         </div>
                                     `}
                                 </div>
@@ -699,231 +670,237 @@ export default function App() {
                     </div>
                 </aside>
 
-                <!-- Center Panel: interactive graph -->
-                <section className="graph-canvas-container glass-panel">
-                    <div className="panel-header" style=${{borderRadius: '16px 16px 0 0'}}>
-                        <span>Interactive Codebase Graph</span>
-                        <div style=${{display: 'flex', gap: '8px', alignItems: 'center'}}>
-                            <${Icons.Network} />
-                        </div>
-                    </div>
+                <!-- Right Area: Graph Top, Drawer Bottom -->
+                <div className="workspace-content">
                     
-                    <div ref=${containerRef} className="graph-canvas">
-                        ${!data && html`
-                            <div className="empty-state">
-                                <${Icons.GitPullRequest} />
-                                <h3 style=${{marginTop: '10px', color: 'var(--text-secondary)'}}>No Active Analysis</h3>
-                                <p style=${{fontSize: '0.8rem', maxWidth: '300px', margin: '6px auto 0'}}>Input a public repo and trigger an analysis to render the dependency blast radius graph.</p>
+                    <!-- Center Panel: interactive graph -->
+                    <section className="graph-canvas-container glass-panel">
+                        <div className="panel-header" style=${{borderRadius: '16px 16px 0 0'}}>
+                            <span>Interactive Codebase Graph</span>
+                            <div style=${{display: 'flex', gap: '8px', alignItems: 'center'}}>
+                                <${Icons.Network} />
+                            </div>
+                        </div>
+                        
+                        <div ref=${containerRef} className="graph-canvas">
+                            ${!data && html`
+                                <div className="empty-state">
+                                    <${Icons.GitPullRequest} />
+                                    <h3 style=${{marginTop: '10px', color: 'var(--text-secondary)'}}>No Active Analysis</h3>
+                                    <p style=${{fontSize: '0.8rem', maxWidth: '300px', margin: '6px auto 0'}}>Input a public repo and trigger an analysis to render the dependency blast radius graph.</p>
+                                </div>
+                            `}
+                        </div>
+
+                        ${data && html`
+                            <div className="graph-legend">
+                                <div className="legend-item">
+                                    <span className="legend-color modified"></span>
+                                    <span>Modified File</span>
+                                </div>
+                                <div className="legend-item">
+                                    <span className="legend-color impacted"></span>
+                                    <span>Impacted File</span>
+                                </div>
+                                <div className="legend-item">
+                                    <span className="legend-color neutral"></span>
+                                    <span>No Impact</span>
+                                </div>
+                                <div style=${{marginLeft: 'auto', color: 'var(--text-muted)'}}>
+                                    <i data-lucide="help-circle" style=${{width: '12px', height: '12px', verticalAlign: 'middle', marginRight: '4px'}}></i>
+                                    Hover node to highlight blast radius
+                                </div>
                             </div>
                         `}
-                    </div>
 
-                    ${data && html`
-                        <div className="graph-legend">
-                            <div className="legend-item">
-                                <span className="legend-color modified"></span>
-                                <span>Modified File</span>
+                        <!-- Loading overlay -->
+                        ${loading && html`
+                            <div className="loading-overlay">
+                                <div className="spinner"></div>
+                                <span style=${{fontWeight: 500, fontSize: '0.95rem'}}>Downloading repository and computing graph dependencies...</span>
                             </div>
-                            <div className="legend-item">
-                                <span className="legend-color impacted"></span>
-                                <span>Impacted File</span>
-                            </div>
-                            <div className="legend-item">
-                                <span className="legend-color neutral"></span>
-                                <span>No Impact</span>
-                            </div>
-                            <div style=${{marginLeft: 'auto', color: 'var(--text-muted)'}}>
-                                <i data-lucide="help-circle" style=${{width: '12px', height: '12px', verticalAlign: 'middle', marginRight: '4px'}}></i>
-                                Hover node to highlight blast radius
-                            </div>
-                        </div>
-                    `}
+                        `}
 
-                    <!-- Loading overlay -->
-                    ${loading && html`
-                        <div className="loading-overlay">
-                            <div className="spinner"></div>
-                            <span style=${{fontWeight: 500, fontSize: '0.95rem'}}>Downloading repository and computing graph dependencies...</span>
-                        </div>
-                    `}
+                        <!-- Error display -->
+                        ${error && html`
+                            <div className="loading-overlay" style=${{background: 'rgba(3, 7, 18, 0.9)'}}>
+                                <${Icons.XCircle} />
+                                <span style=${{fontWeight: 600, color: '#f87171'}}>Analysis Failed</span>
+                                <p style=${{fontSize: '0.8rem', color: 'var(--text-secondary)', maxWidth: '400px', textAlign: 'center'}}>${error}</p>
+                                <button className="btn-analyze" style=${{marginTop: '10px', background: 'transparent', border: '1px solid var(--border-color)'}} onClick=${() => setError(null)}>Dismiss</button>
+                            </div>
+                        `}
+                    </section>
 
-                    <!-- Error display -->
-                    ${error && html`
-                        <div className="loading-overlay" style=${{background: 'rgba(3, 7, 18, 0.9)'}}>
-                            <${Icons.XCircle} />
-                            <span style=${{fontWeight: 600, color: '#f87171'}}>Analysis Failed</span>
-                            <p style=${{fontSize: '0.8rem', color: 'var(--text-secondary)', maxWidth: '400px', textAlign: 'center'}}>${error}</p>
-                            <button className="btn-analyze" style=${{marginTop: '10px', background: 'transparent', border: '1px solid var(--border-color)'}} onClick=${() => setError(null)}>Dismiss</button>
-                        </div>
-                    `}
-
-                    <!-- Floating Inspector Panel -->
-                    ${nodeDetails && html`
-                        <div className="floating-inspector glass-panel">
-                            <div className="inspector-header">
-                                <div style=${{display: 'flex', alignItems: 'center', gap: '8px'}}>
-                                    <${Icons.FileCode} />
-                                    <span style=${{fontWeight: 600, fontSize: '0.85rem'}}>${nodeDetails.id}</span>
-                                    <span className="file-badge ${nodeDetails.status}">${nodeDetails.status}</span>
-                                </div>
-                                <button className="btn-close" onClick=${() => setSelectedNode(null)}>
-                                    <${Icons.X} />
+                    <!-- Bottom Drawer Panel -->
+                    <section className="details-drawer glass-panel">
+                        <div className="drawer-tabs">
+                            <button 
+                                className="drawer-tab ${drawerTab === 'modified' ? 'active' : ''}" 
+                                onClick=${() => setDrawerTab('modified')}
+                            >
+                                <span>Modified Files</span>
+                                <span className="drawer-tab-badge">${data ? data.modified_files.length : 0}</span>
+                            </button>
+                            <button 
+                                className="drawer-tab ${drawerTab === 'impacted' ? 'active' : ''}" 
+                                onClick=${() => setDrawerTab('impacted')}
+                            >
+                                <span>Transitive Blast Radius</span>
+                                <span className="drawer-tab-badge">${data ? data.all_impacted_files.length : 0}</span>
+                            </button>
+                            ${data && data.impacted_apis && data.impacted_apis.length > 0 && html`
+                                <button 
+                                    className="drawer-tab ${drawerTab === 'entrypoints' ? 'active' : ''}" 
+                                    onClick=${() => setDrawerTab('entrypoints')}
+                                >
+                                    <span>Public Entrypoints</span>
+                                    <span className="drawer-tab-badge">${data.impacted_apis.length}</span>
                                 </button>
-                            </div>
-                            <div className="inspector-body">
-                                ${nodeDetails.entities.length > 0 ? html`
-                                    <div>
-                                        <p style=${{color: 'var(--text-secondary)', marginBottom: '6px', fontWeight: 600}}>Key References / At-Risk Entities:</p>
-                                        <div style=${{display: 'flex', flexWrap: 'wrap', gap: '6px'}}>
-                                            ${nodeDetails.entities.map(ent => html`
-                                                <span key=${ent} className="entity-tag" style=${{background: 'rgba(99, 102, 241, 0.1)', color: '#a5b4fc', border: '1px solid rgba(99, 102, 241, 0.2)'}}>${ent}</span>
-                                            `)}
-                                        </div>
-                                    </div>
-                                ` : html`
-                                    <p style=${{color: 'var(--text-muted)'}}>No modified or at-risk entities detected in this file.</p>
-                                `}
-                            </div>
+                            `}
+                            ${nodeDetails && html`
+                                <button 
+                                    className="drawer-tab ${drawerTab === 'inspector' ? 'active' : ''}" 
+                                    onClick=${() => setDrawerTab('inspector')}
+                                >
+                                    <span>Selected File Details</span>
+                                </button>
+                            `}
                         </div>
-                    `}
-                </section>
-
-                <!-- Right Sidebar: Impacted downstream consumers -->
-                <aside className="sidebar glass-panel">
-                    <div className="panel-header">
-                        <span>Downstream Impact</span>
-                        <${Icons.Activity} />
-                    </div>
-                    
-                    <div className="panel-body">
-                        ${!data ? html`
-                            <div className="empty-state">
-                                <${Icons.AlertTriangle} />
-                                <span>Submit repo coordinates to load downstream impacts.</span>
-                            </div>
-                        ` : html`
-                            <!-- Impacted Files List -->
-                            <div style=${{display: 'flex', flexDirection: 'column', gap: '16px'}}>
-                                <div>
-                                    <div 
-                                        onClick=${() => setDownstreamExpanded(!downstreamExpanded)} 
-                                        style=${{
-                                            display: 'flex', 
-                                            justifyContent: 'space-between', 
-                                            alignItems: 'center', 
-                                            cursor: 'pointer', 
-                                            userSelect: 'none',
-                                            marginBottom: '10px'
-                                        }}
-                                    >
-                                        <h3 style=${{fontSize: '0.8rem', color: 'var(--text-secondary)', textTransform: 'uppercase', margin: 0}}>Affected Downstream Modules</h3>
-                                        <span style=${{color: 'var(--text-muted)', display: 'flex', alignItems: 'center'}}>
-                                            <${downstreamExpanded ? Icons.ChevronDown : Icons.ChevronRight} size=${14} />
-                                        </span>
-                                    </div>
-                                    
-                                    ${downstreamExpanded && html`
-                                        <p style=${{fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '10px'}}>These files import elements of changed files directly or transitively.</p>
-                                        <div className="file-list" style=${{overflowY: 'auto', maxHeight: '220px'}}>
-                                            ${data.all_impacted_files.length === 0 ? html`
-                                                <div className="empty-state" style=${{padding: '10px'}}>🟢 No downstream modules impacted!</div>
-                                            ` : Object.entries(groupedImpacted).map(([lang, files]) => html`
-                                                <div key=${lang} style=${{marginBottom: '12px'}}>
-                                                    <div style=${{
-                                                        fontSize: '0.7rem', 
-                                                        fontWeight: '700', 
-                                                        color: 'var(--text-muted)', 
-                                                        marginBottom: '6px', 
-                                                        padding: '4px 8px', 
-                                                        background: 'rgba(255, 255, 255, 0.02)',
-                                                        borderRadius: '4px',
-                                                        display: 'flex', 
-                                                        justifyContent: 'space-between',
-                                                        alignItems: 'center'
-                                                    }}>
-                                                        <span>${lang} Files</span>
-                                                        <span style=${{background: 'rgba(99, 102, 241, 0.15)', color: '#a5b4fc', borderRadius: '10px', padding: '0 6px', fontSize: '0.65rem'}}>${files.length}</span>
+                        <div className="drawer-body">
+                            ${drawerTab === 'modified' && html`
+                                <div className="file-list">
+                                    ${!data ? html`
+                                        <div className="empty-state" style=${{padding: '20px'}}>Submit repo coordinates to load risk summary.</div>
+                                    ` : data.modified_files.length === 0 ? html`
+                                        <div className="empty-state" style=${{padding: '20px'}}>No modifications detected.</div>
+                                    ` : Object.entries(groupedModified).map(([lang, items]) => html`
+                                        <div key=${lang} className="drawer-lang-section">
+                                            <div className="drawer-lang-header">
+                                                <span>${lang} Files</span>
+                                                <span className="drawer-lang-count">${items.length}</span>
+                                            </div>
+                                            <div className="drawer-grid">
+                                                ${items.map(item => html`
+                                                    <div 
+                                                        key=${item.file} 
+                                                        className="file-item ${selectedNode?.id === item.file ? 'selected' : ''}"
+                                                        onClick=${() => setSelectedNode({ id: item.file, isModified: true, isImpacted: false })}
+                                                    >
+                                                        <div className="file-item-header">
+                                                            <span className="file-name" title=${item.file}>${item.file}</span>
+                                                            <span className="file-badge modified">Modified</span>
+                                                        </div>
+                                                        <div className="entity-tags">
+                                                            ${item.changed_entities.map(e => html`
+                                                                <span key=${e.entity} className="entity-tag">${e.entity}</span>
+                                                            `)}
+                                                        </div>
                                                     </div>
-                                                    ${files.map(file => {
-                                                        const atRiskFuncs = data.at_risk_functions[file] || [];
-                                                        return html`
-                                                            <div 
-                                                                key=${file} 
-                                                                className="file-item ${selectedNode?.id === file ? 'selected' : ''}"
-                                                                onClick=${() => setSelectedNode({ id: file, isModified: false, isImpacted: true })}
-                                                            >
-                                                                <div className="file-item-header">
-                                                                    <span className="file-name" title=${file}>${file}</span>
-                                                                    <span className="file-badge impacted">Impacted</span>
-                                                                </div>
-                                                                ${atRiskFuncs.length > 0 && html`
-                                                                    <div className="entity-tags">
-                                                                        ${atRiskFuncs.map(f => html`
-                                                                            <span key=${f} className="entity-tag" style=${{color: 'var(--color-danger)', background: 'rgba(239, 68, 68, 0.05)'}}>${f}()</span>
-                                                                        `)}
-                                                                    </div>
-                                                                `}
-                                                            </div>
-                                                        `;
-                                                    })}
-                                                </div>
-                                            `)}
+                                                `)}
+                                            </div>
                                         </div>
-                                    `}
+                                    `)}
                                 </div>
-                                
-                                ${data.impacted_apis && data.impacted_apis.length > 0 && html`
-                                    <div style=${{marginTop: '16px'}}>
-                                        <div 
-                                            onClick=${() => setEntrypointsExpanded(!entrypointsExpanded)} 
-                                            style=${{
-                                                display: 'flex', 
-                                                justifyContent: 'space-between', 
-                                                alignItems: 'center', 
-                                                cursor: 'pointer', 
-                                                userSelect: 'none',
-                                                marginBottom: '10px'
-                                            }}
-                                        >
-                                            <h3 style=${{fontSize: '0.8rem', color: '#f87171', textTransform: 'uppercase', margin: 0}}>
-                                                🚨 Impacted Public Entrypoints
-                                            </h3>
-                                            <span style=${{color: 'var(--text-muted)', display: 'flex', alignItems: 'center'}}>
-                                                <${entrypointsExpanded ? Icons.ChevronDown : Icons.ChevronRight} size=${14} />
-                                            </span>
-                                        </div>
-                                        
-                                        ${entrypointsExpanded && html`
-                                            <p style=${{fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '10px'}}>These Web APIs and CLI commands are in the blast radius.</p>
-                                            <div className="file-list" style=${{overflowY: 'auto', maxHeight: '180px'}}>
-                                                ${data.impacted_apis.map((api, idx) => {
-                                                    let badgeStyle = { marginRight: '6px', fontWeight: 700, padding: '2px 6px', borderRadius: '4px', fontSize: '0.65rem' };
-                                                    if (api.method === 'GET') { badgeStyle = {...badgeStyle, background: 'rgba(16, 185, 129, 0.15)', color: '#34d399', border: '1px solid rgba(16, 185, 129, 0.3)'}; }
-                                                    else if (api.method === 'POST') { badgeStyle = {...badgeStyle, background: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa', border: '1px solid rgba(59, 130, 246, 0.3)'}; }
-                                                    else if (api.method === 'DELETE') { badgeStyle = {...badgeStyle, background: 'rgba(239, 68, 68, 0.15)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.3)'}; }
-                                                    else { badgeStyle = {...badgeStyle, background: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24', border: '1px solid rgba(245, 158, 11, 0.3)'}; }
-                                                    
+                            `}
+                            
+                            ${drawerTab === 'impacted' && html`
+                                <div className="file-list">
+                                    ${!data ? html`
+                                        <div className="empty-state" style=${{padding: '20px'}}>Submit repo coordinates to load downstream impacts.</div>
+                                    ` : data.all_impacted_files.length === 0 ? html`
+                                        <div className="empty-state" style=${{padding: '20px'}}>🟢 No downstream modules impacted!</div>
+                                    ` : Object.entries(groupedImpacted).map(([lang, files]) => html`
+                                        <div key=${lang} className="drawer-lang-section">
+                                            <div className="drawer-lang-header">
+                                                <span>${lang} Files</span>
+                                                <span className="drawer-lang-count">${files.length}</span>
+                                            </div>
+                                            <div className="drawer-grid">
+                                                ${files.map(file => {
+                                                    const atRiskFuncs = data.at_risk_functions[file] || [];
                                                     return html`
-                                                        <div key=${idx} className="file-item" onClick=${() => setSelectedNode({ id: api.file, isModified: false, isImpacted: true })}>
-                                                            <div className="file-item-header" style=${{marginBottom: '6px'}}>
-                                                                <span style=${badgeStyle}>${api.method}</span>
-                                                                <span className="file-name" style=${{color: '#f3f4f6', fontFamily: 'monospace', fontSize: '0.75rem'}} title=${api.path}>${api.path}</span>
+                                                        <div 
+                                                            key=${file} 
+                                                            className="file-item ${selectedNode?.id === file ? 'selected' : ''}"
+                                                            onClick=${() => setSelectedNode({ id: file, isModified: false, isImpacted: true })}
+                                                        >
+                                                            <div className="file-item-header">
+                                                                <span className="file-name" title=${file}>${file}</span>
+                                                                <span className="file-badge impacted">Impacted</span>
                                                             </div>
-                                                            <div style=${{fontSize: '0.7rem', color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between'}}>
-                                                                <span>via <code>${api.function}()</code></span>
-                                                                <span title=${api.file}>...${api.file.split('/').pop()}</span>
-                                                            </div>
+                                                            ${atRiskFuncs.length > 0 && html`
+                                                                <div className="entity-tags">
+                                                                    ${atRiskFuncs.map(f => html`
+                                                                        <span key=${f} className="entity-tag" style=${{color: 'var(--color-danger)', background: 'rgba(239, 68, 68, 0.05)'}}>${f}()</span>
+                                                                    `)}
+                                                                </div>
+                                                            `}
                                                         </div>
                                                     `;
                                                 })}
                                             </div>
+                                        </div>
+                                    `)}
+                                </div>
+                            `}
+
+                            ${drawerTab === 'entrypoints' && data && data.impacted_apis && html`
+                                <div className="drawer-grid">
+                                    ${data.impacted_apis.map((api, idx) => {
+                                        let badgeStyle = { marginRight: '6px', fontWeight: 700, padding: '2px 6px', borderRadius: '4px', fontSize: '0.65rem' };
+                                        if (api.method === 'GET') { badgeStyle = {...badgeStyle, background: 'rgba(16, 185, 129, 0.15)', color: '#34d399', border: '1px solid rgba(16, 185, 129, 0.3)'}; }
+                                        else if (api.method === 'POST') { badgeStyle = {...badgeStyle, background: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa', border: '1px solid rgba(59, 130, 246, 0.3)'}; }
+                                        else if (api.method === 'DELETE') { badgeStyle = {...badgeStyle, background: 'rgba(239, 68, 68, 0.15)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.3)'}; }
+                                        else { badgeStyle = {...badgeStyle, background: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24', border: '1px solid rgba(245, 158, 11, 0.3)'}; }
+                                        
+                                        return html`
+                                            <div key=${idx} className="file-item" onClick=${() => setSelectedNode({ id: api.file, isModified: false, isImpacted: true })}>
+                                                <div className="file-item-header" style=${{marginBottom: '6px'}}>
+                                                    <span style=${badgeStyle}>${api.method}</span>
+                                                    <span className="file-name" style=${{color: '#f3f4f6', fontFamily: 'monospace', fontSize: '0.75rem'}} title=${api.path}>${api.path}</span>
+                                                </div>
+                                                <div style=${{fontSize: '0.7rem', color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between'}}>
+                                                    <span>via <code>${api.function}()</code></span>
+                                                    <span title=${api.file}>...${api.file.split('/').pop()}</span>
+                                                </div>
+                                            </div>
+                                        `;
+                                    })}
+                                </div>
+                            `}
+
+                            ${drawerTab === 'inspector' && nodeDetails && html`
+                                <div style=${{animation: 'slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1)'}}>
+                                    <div className="inspector-header" style=${{padding: '0 0 12px', marginBottom: '12px'}}>
+                                        <div style=${{display: 'flex', alignItems: 'center', gap: '8px'}}>
+                                            <${Icons.FileCode} />
+                                            <span style=${{fontWeight: 600, fontSize: '0.9rem'}}>${nodeDetails.id}</span>
+                                            <span className="file-badge ${nodeDetails.status}">${nodeDetails.status}</span>
+                                        </div>
+                                        <button className="btn-close" onClick=${() => setSelectedNode(null)}>
+                                            <${Icons.X} />
+                                        </button>
+                                    </div>
+                                    <div className="inspector-body" style=${{padding: '0'}}>
+                                        ${nodeDetails.entities.length > 0 ? html`
+                                            <div>
+                                                <p style=${{color: 'var(--text-secondary)', marginBottom: '8px', fontWeight: 600, fontSize: '0.8rem'}}>Key References / At-Risk Entities:</p>
+                                                <div style=${{display: 'flex', flexWrap: 'wrap', gap: '8px'}}>
+                                                    ${nodeDetails.entities.map(ent => html`
+                                                        <span key=${ent} className="entity-tag" style=${{background: 'rgba(99, 102, 241, 0.1)', color: '#a5b4fc', border: '1px solid rgba(99, 102, 241, 0.2)', padding: '4px 8px', fontSize: '0.75rem'}}>${ent}</span>
+                                                    `)}
+                                                </div>
+                                            </div>
+                                        ` : html`
+                                            <p style=${{color: 'var(--text-muted)', fontSize: '0.8rem'}}>No modified or at-risk entities detected in this file.</p>
                                         `}
                                     </div>
-                                `}
-                            </div>
-                        `}
-                    </div>
-                </aside>
+                                </div>
+                            `}
+                        </div>
+                    </section>
+                </div>
             </main>
         </div>
     `;

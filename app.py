@@ -449,9 +449,20 @@ async def api_analyze(req: AnalyzeRequest):
                 "changed_entities": changed_entities
             })
             
+        summary_text = ""
+        if risk_score == 0:
+            summary_text = "No downstream dependencies are impacted by the modified files. The blast radius is contained and there is no significant architectural risk."
+        else:
+            api_impact_text = f" This includes {len(impacted_apis)} public API entrypoint(s) that may experience side effects." if impacted_apis else ""
+            if risk_score >= 50:
+                summary_text = f"Major architectural risk detected. {len(modified_files)} modified file(s) are impacting {len(all_impacted_files)} downstream modules.{api_impact_text} Extensive regression testing is highly recommended."
+            else:
+                summary_text = f"Moderate risk detected. {len(modified_files)} modified file(s) are impacting {len(all_impacted_files)} downstream modules.{api_impact_text} Proceed with caution and ensure affected modules are tested."
+            
         return {
             "status": status,
             "risk_score": risk_score,
+            "summary_text": summary_text,
             "modified_files": formatted_mod_files,
             "all_impacted_files": list(all_impacted_files),
             "at_risk_functions": at_risk_functions,
