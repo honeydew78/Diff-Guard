@@ -57,7 +57,9 @@ Clicking the **Browse** button opens a modal that allows you to browse branch-sp
 - **Commit Timeline:** View commit messages, authors, dates, and SHAs in chronological order.
 - **Target Selectors:** Interactively assign any commit in the list as the **Base** or **Head** commit for your risk analysis with a single click.
 
-![Commit Browser](commit_browser.png)
+![Commit Browser]
+<img width="1097" height="780" alt="Screenshot 2026-06-10 at 1 20 28 PM" src="https://github.com/user-attachments/assets/4821f99a-e811-4fd5-b8a5-efa898258cd8" />
+
 
 ### 3. Inspecting Modified Files & AST Changes
 The **Modified Files** tab shows all the code files changed between the two commits, listing the specific AST entities (functions, routes) that were added, deleted, or modified.
