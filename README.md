@@ -47,22 +47,30 @@ At the top of the interface, input a GitHub Repository URL and use the **Browse*
 - **Purple Nodes:** Impacted downstream files.
 - **Grey Nodes:** Untouched modules.
 
-![Main Dashboard](dashboard_main.png)
+![Main Dashboard]
+<img width="1469" height="792" alt="Screenshot 2026-06-10 at 1 09 53 PM" src="https://github.com/user-attachments/assets/dfd57acd-bc14-4c4f-b0aa-755f903b8412" />
+
 
 ### 2. Inspecting Modified Files & AST Changes
 The **Modified Files** tab shows all the code files changed between the two commits, listing the specific AST entities (functions, routes) that were added, deleted, or modified.
 
-![Modified Files](modified_files.png)
+![Modified Files]
+<img width="1470" height="797" alt="Screenshot 2026-06-10 at 1 10 19 PM" src="https://github.com/user-attachments/assets/b2282b43-d500-4310-bd0b-5733cdaa66bb" />
+
 
 ### 3. Tracking Transitive Blast Radius
 The **Transitive Blast Radius** tab shows all files impacted upstream by the changes, highlighting the exact dependency paths, downstream functions at risk, and affected public API routes.
 
-![Transitive Blast Radius](blast_radius.png)
+![Transitive Blast Radius]
+<img width="1469" height="792" alt="Screenshot 2026-06-10 at 1 10 33 PM" src="https://github.com/user-attachments/assets/a0bdb9e7-acbf-44c5-89f4-bac1b5bdb9e1" />
+
 
 ### 4. Local Analysis History
 The **History** tab in the sidebar saves previous analysis runs inside your browser's local storage. This allows you to instantly reload past codebase graphs or clear historical runs with a single click.
 
-![Analysis History](history.png)
+![Analysis History]
+<img width="1470" height="794" alt="Screenshot 2026-06-10 at 1 12 25 PM" src="https://github.com/user-attachments/assets/2b3de259-eabe-4654-a25d-9cae0fab27bd" />
+
 
 ---
 
