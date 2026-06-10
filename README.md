@@ -51,21 +51,29 @@ At the top of the interface, input a GitHub Repository URL and use the **Browse*
 <img width="1469" height="792" alt="Screenshot 2026-06-10 at 1 09 53 PM" src="https://github.com/user-attachments/assets/dfd57acd-bc14-4c4f-b0aa-755f903b8412" />
 
 
-### 2. Inspecting Modified Files & AST Changes
+### 2. Branch & Commit Browser Modal
+Clicking the **Browse** button opens a modal that allows you to browse branch-specific commit history fetched directly from the GitHub API.
+- **Branch Dropdown:** Select a branch from the dropdown menu (e.g., `main`, `stable`, `workflow`) to retrieve its recent commits.
+- **Commit Timeline:** View commit messages, authors, dates, and SHAs in chronological order.
+- **Target Selectors:** Interactively assign any commit in the list as the **Base** or **Head** commit for your risk analysis with a single click.
+
+![Commit Browser](commit_browser.png)
+
+### 3. Inspecting Modified Files & AST Changes
 The **Modified Files** tab shows all the code files changed between the two commits, listing the specific AST entities (functions, routes) that were added, deleted, or modified.
 
 ![Modified Files]
 <img width="1470" height="797" alt="Screenshot 2026-06-10 at 1 10 19 PM" src="https://github.com/user-attachments/assets/b2282b43-d500-4310-bd0b-5733cdaa66bb" />
 
 
-### 3. Tracking Transitive Blast Radius
+### 4. Tracking Transitive Blast Radius
 The **Transitive Blast Radius** tab shows all files impacted upstream by the changes, highlighting the exact dependency paths, downstream functions at risk, and affected public API routes.
 
 ![Transitive Blast Radius]
 <img width="1469" height="792" alt="Screenshot 2026-06-10 at 1 10 33 PM" src="https://github.com/user-attachments/assets/a0bdb9e7-acbf-44c5-89f4-bac1b5bdb9e1" />
 
 
-### 4. Local Analysis History
+### 5. Local Analysis History
 The **History** tab in the sidebar saves previous analysis runs inside your browser's local storage. This allows you to instantly reload past codebase graphs or clear historical runs with a single click.
 
 ![Analysis History]
