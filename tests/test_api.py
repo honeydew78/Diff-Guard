@@ -4,6 +4,13 @@ from app import app
 
 client = TestClient(app)
 
+def test_health_endpoint():
+    response = client.get("/api/health")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "ok"
+    assert data["service"] == "diff-guard"
+
 def test_webhook_missing_header():
     response = client.post("/webhook", json={})
     assert response.status_code == 400
