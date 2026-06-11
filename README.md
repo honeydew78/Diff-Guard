@@ -21,19 +21,23 @@ Diff-Guard is a stateless, high-performance static analyzer and developer tool d
 
 ## 🚦 Understanding the Risk Score
 
-Diff-Guard calculates a **Risk Score (0-100%)** to quantify the *architectural fragility* of a change. It doesn't measure code quality (like a linter), but rather how interconnected the modified code is. This helps teams prioritize code review time and testing resources.
+Diff-Guard calculates a **Risk Score (0-100)** to quantify the *architectural fragility* of a change. The score is a multi-factor calculation based on:
+1. **Graph Centrality (up to 40 pts):** Betweenness centrality of the modified files in the dependency graph.
+2. **Blast Radius (up to 30 pts):** The total number of downstream modules impacted by the change.
+3. **Public API Exposure (up to 20 pts):** The number of downstream user-facing API endpoints affected.
+4. **Deleted Functions (up to 10 pts):** The count of removed semantic entities.
 
-- 🟢 **Low Risk (0 - 49%) - *Isolated Change*:** 
-  The modified files are "leaf nodes" (e.g., standalone scripts, tests, isolated features) and have few downstream dependents.
-  - *Context:* Junior/mid-level engineers can confidently approve. Minimal regression testing needed.
+- 🟢 **Low Risk (0 - 19) - *Isolated Change*:** 
+  The modified files have limited connectivity and impact few, if any, downstream consumers.
+  - *Context:* Standard code review is sufficient.
   
-- 🟡 **Medium Risk (50 - 79%) - *Moderate Dependency*:**
-  The change modifies components imported by multiple downstream modules, but isn't core infrastructure.
-  - *Context:* Reviewers should check the interfaces. QA should write or run integration tests specifically for the impacted downstream modules.
+- 🟡 **Moderate Risk (20 - 49) - *Moderate Dependency*:**
+  The change ripples into several downstream consumers that should be verified.
+  - *Context:* Ensure integration tests cover the affected downstream modules.
 
-- 🔴 **High Risk (80 - 100%) - *Core Infrastructure Change*:**
-  The modified code is highly centralized (e.g., database connection handler, core authentication module). A bug here will cascade through the entire system.
-  - *Context:* Requires a Senior Engineer or Tech Lead review. Meticulous backward compatibility checks and exhaustive regression test suites are justified.
+- 🔴 **High to Critical Risk (50 - 100) - *Core Infrastructure Change*:**
+  The modified code is highly centralized (e.g., core utilities) and has a wide downstream impact.
+  - *Context:* Requires a Senior Engineer review. Extensive regression testing and validation of impacted API contracts are strongly recommended.
 
 ---
 
@@ -114,7 +118,7 @@ The **History** tab in the sidebar saves previous analysis runs inside your brow
 ## 🚀 Setup & Local Execution
 
 ### 1. Installation Requirements
-Ensure you are running Python 3.9+ and have installed the required dependencies:
+Ensure you are running Python 3.11+ and have installed the required dependencies:
 ```bash
 python3 -m venv venv
 source venv/bin/activate
@@ -124,7 +128,7 @@ pip install -r requirements.txt
 ### 2. Run Local Test Suite
 To verify the AST parsing, dependency graph assembly, and reachability engine:
 ```bash
-python sandbox_test.py
+pytest tests/ -v
 ```
 
 ### 3. Start the Web Dashboard and API
@@ -160,6 +164,8 @@ python cli.py --base main --head feature-branch --post-comment --pr-number 42 --
 
 ## 🕸️ API Endpoints
 
+- **`GET /api/health`**  
+  Health check endpoint to verify service status.
 - **`POST /webhook`**  
   GitHub App/Webhook endpoint. Listens for `pull_request` events (`opened`, `synchronize`, `reopened`), performs analysis, and posts PR comments.
 - **`GET /api/branches?repo_url=<URL>`**  
